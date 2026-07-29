@@ -1,0 +1,4 @@
+elevenlabs
+flask
+openai
+python-dotenv

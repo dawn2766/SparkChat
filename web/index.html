@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SparkChat Voice</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Georgia, "Times New Roman", serif;
+        --ink: #17231d;
+        --muted: #64736b;
+        --paper: #f4f0e8;
+        --panel: #fffdf7;
+        --line: #d6d6c9;
+        --accent: #d55c3d;
+        --accent-dark: #9e3824;
+        --sage: #dce6d8;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.6), transparent 45%),
+          repeating-linear-gradient(0deg, rgba(23, 35, 29, 0.035) 0 1px, transparent 1px 5px),
+          var(--paper);
+      }
+
+      main {
+        width: min(720px, calc(100% - 32px));
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 8vh 0 7vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .masthead {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent-dark);
+        font: 700 12px/1.2 Arial, sans-serif;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 480px;
+        margin: 0;
+        font-size: clamp(42px, 8vw, 76px);
+        line-height: 0.95;
+        font-weight: 500;
+      }
+
+      .status {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+        color: var(--muted);
+        font: 12px/1.2 Arial, sans-serif;
+      }
+
+      .status::before {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--line);
+        content: "";
+      }
+
+      .status.connected::before {
+        background: #4d9865;
+        box-shadow: 0 0 0 4px rgba(77, 152, 101, 0.15);
+      }
+
+      .stage {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 180px;
+        gap: 28px;
+        align-items: center;
+        padding: 46px 0;
+      }
+
+      .prompt {
+        margin: 0;
+        max-width: 420px;
+        font-size: 27px;
+        line-height: 1.2;
+      }
+
+      .prompt span { color: var(--muted); }
+
+      .talk-button {
+        width: 164px;
+        height: 164px;
+        justify-self: end;
+        border: 1px solid var(--accent-dark);
+        border-radius: 50%;
+        color: var(--panel);
+        background: var(--accent);
+        box-shadow: 10px 12px 0 var(--sage);
+        cursor: pointer;
+        font: 700 16px/1.1 Arial, sans-serif;
+        transition: transform 160ms ease, background 160ms ease;
+      }
+
+      .talk-button:hover { transform: translateY(-3px); }
+      .talk-button:active { transform: translateY(1px); }
+      .talk-button:disabled { cursor: not-allowed; opacity: 0.6; }
+      .talk-button.stop { background: var(--ink); border-color: var(--ink); }
+
+      .note {
+        margin: 0;
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font: 13px/1.6 Arial, sans-serif;
+      }
+
+      .error {
+        min-height: 20px;
+        margin: 14px 0 0;
+        color: var(--accent-dark);
+        font: 13px/1.4 Arial, sans-serif;
+      }
+
+      @media (max-width: 560px) {
+        main { padding: 32px 0; }
+        .masthead { display: block; }
+        .status { margin-top: 22px; }
+        .stage {
+          grid-template-columns: 1fr;
+          gap: 34px;
+          padding: 58px 0;
+        }
+        .talk-button { justify-self: start; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">SparkChat / voice agent</p>
+          <h1>聊聊，<br />现在。</h1>
+        </div>
+        <div class="status" id="status">未连接</div>
+      </header>
+
+      <section class="stage" aria-label="语音对话控制">
+        <p class="prompt">按下按钮开始。<br /><span>允许麦克风后，直接说话即可。</span></p>
+        <button class="talk-button" id="talk" type="button">开始对话</button>
+      </section>
+
+      <p class="note">对话由 ElevenLabs 负责语音识别与合成，由豆包 Seed 2.1 生成回答。</p>
+      <p class="error" id="error" role="alert"></p>
+    </main>
+
+    <script type="module">
+      import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm";
+
+      const talkButton = document.querySelector("#talk");
+      const status = document.querySelector("#status");
+      const errorMessage = document.querySelector("#error");
+      let conversation = null;
+
+      function setStatus(label, connected = false) {
+        status.textContent = label;
+        status.classList.toggle("connected", connected);
+      }
+
+      async function getToken() {
+        const response = await fetch("/api/token");
+        if (!response.ok) throw new Error("获取会话令牌失败");
+        return (await response.json()).token;
+      }
+
+      async function startConversation() {
+        errorMessage.textContent = "";
+        talkButton.disabled = true;
+        setStatus("连接中");
+        try {
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+          const token = await getToken();
+          conversation = await Conversation.startSession({
+            conversationToken: token,
+            onConnect: () => {
+              setStatus("已连接", true);
+              talkButton.disabled = false;
+              talkButton.textContent = "结束对话";
+              talkButton.classList.add("stop");
+            },
+            onDisconnect: () => {
+              conversation = null;
+              setStatus("未连接");
+              talkButton.disabled = false;
+              talkButton.textContent = "开始对话";
+              talkButton.classList.remove("stop");
+            },
+            onError: (error) => {
+              errorMessage.textContent = error?.message || "语音连接发生错误";
+            },
+          });
+        } catch (error) {
+          conversation = null;
+          setStatus("未连接");
+          talkButton.disabled = false;
+          errorMessage.textContent = error.message || "无法开始对话";
+        }
+      }
+
+      async function stopConversation() {
+        talkButton.disabled = true;
+        if (conversation) await conversation.endSession();
+      }
+
+      talkButton.addEventListener("click", () => {
+        if (conversation) stopConversation();
+        else startConversation();
+      });
+    </script>
+  </body>
+</html>
