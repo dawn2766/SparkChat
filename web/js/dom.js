@@ -17,7 +17,8 @@ export function notify(text) {
 
 export function avatar(character, small = false) {
   const name = character?.name || "?";
-  return `<div class="avatar ${name === "威震天" ? "megatron" : ""} ${small ? "small" : ""}">${esc(name.slice(0, 1))}</div>`;
+  const image = character?.avatarUrl ? `<img src="${esc(character.avatarUrl)}" alt="">` : esc(name.slice(0, 1));
+  return `<div class="avatar ${!character?.avatarUrl && name === "威震天" ? "megatron" : ""} ${small ? "small" : ""}">${image}</div>`;
 }
 
 export function shell(content, active = "home") {

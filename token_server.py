@@ -135,6 +135,7 @@ def init_db():
             memory TEXT NOT NULL DEFAULT '',
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
+            avatar_url TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (user_id, character_id),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
@@ -162,6 +163,9 @@ def init_db():
         );
         """
     )
+    override_columns = {row["name"] for row in database.execute("PRAGMA table_info(character_overrides)").fetchall()}
+    if "avatar_url" not in override_columns:
+        database.execute("ALTER TABLE character_overrides ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''")
     database.execute(
         "INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)",
         ("CaraLin", generate_password_hash("2766")),
@@ -229,6 +233,18 @@ def serialize_character(row):
         "lastMessage": row["last_message"] if "last_message" in row.keys() else "",
         "lastMessageAt": row["last_message_at"] if "last_message_at" in row.keys() else None,
     }
+
+
+def avatar_url_from(payload, default=""):
+    avatar_url = str(payload.get("avatarUrl", default)).strip()
+    if avatar_url and not (
+        avatar_url.startswith("/assets/")
+        or avatar_url.startswith("data:image/webp;base64,")
+    ):
+        raise ValueError("头像格式无效")
+    if len(avatar_url) > 500_000:
+        raise ValueError("头像文件过大")
+    return avatar_url
 
 
 @app.post("/api/auth/register")
@@ -342,7 +358,7 @@ def design_voice():
 def list_characters():
     rows = get_db().execute(
         """
-        SELECT c.id, c.owner_id, c.avatar_url, c.is_preset, c.created_at,
+        SELECT c.id, c.owner_id, c.is_preset, c.created_at,
             COALESCE(o.name, c.name) AS name,
             COALESCE(o.tagline, c.tagline) AS tagline,
             COALESCE(o.persona, c.persona) AS persona,
@@ -350,6 +366,7 @@ def list_characters():
             COALESCE(o.memory, c.memory) AS memory,
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
             COALESCE(o.voice_name, c.voice_name) AS voice_name,
+            COALESCE(o.avatar_url, c.avatar_url) AS avatar_url,
             (SELECT content FROM messages m WHERE m.character_id = c.id AND m.user_id = ? ORDER BY m.id DESC LIMIT 1) AS last_message,
             (
                 SELECT created_at
@@ -382,6 +399,10 @@ def create_character():
         return jsonify(error="请完整填写角色名称、人设与音色"), 400
     if len(payload["name"].strip()) > 40 or len(payload["persona"].strip()) > 2400:
         return jsonify(error="角色名称或身份背景超过长度限制"), 400
+    try:
+        avatar_url = avatar_url_from(payload)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
     cursor = get_db().execute(
         """
         INSERT INTO characters (
@@ -398,7 +419,7 @@ def create_character():
             payload.get("memory", "").strip(),
             payload["voiceId"].strip(),
             payload["voiceName"].strip(),
-            payload.get("avatarUrl", "").strip(),
+            avatar_url,
         ),
     )
     get_db().commit()
@@ -418,6 +439,10 @@ def update_character(character_id):
         return jsonify(error="请完整填写角色名称、人设与音色"), 400
     if len(payload["name"].strip()) > 40 or len(payload["persona"].strip()) > 2400:
         return jsonify(error="角色名称或身份背景超过长度限制"), 400
+    try:
+        avatar_url = avatar_url_from(payload, character["avatar_url"])
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
     values = (
         payload["name"].strip(),
         payload.get("tagline", "").strip()[:80],
@@ -426,17 +451,19 @@ def update_character(character_id):
         payload.get("memory", "").strip()[:1000],
         payload["voiceId"].strip(),
         payload["voiceName"].strip(),
+        avatar_url,
     )
     if character["is_preset"]:
         get_db().execute(
             """
             INSERT INTO character_overrides (
-                user_id, character_id, name, tagline, persona, background, memory, voice_id, voice_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                user_id, character_id, name, tagline, persona, background, memory, voice_id, voice_name, avatar_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, character_id) DO UPDATE SET
                 name = excluded.name, tagline = excluded.tagline, persona = excluded.persona,
                 background = excluded.background, memory = excluded.memory,
-                voice_id = excluded.voice_id, voice_name = excluded.voice_name
+                voice_id = excluded.voice_id, voice_name = excluded.voice_name,
+                avatar_url = excluded.avatar_url
             """,
             (session["user_id"], character_id, *values),
         )
@@ -445,7 +472,7 @@ def update_character(character_id):
             """
             UPDATE characters
             SET name = ?, tagline = ?, persona = ?, background = ?, memory = ?,
-                voice_id = ?, voice_name = ?
+                voice_id = ?, voice_name = ?, avatar_url = ?
             WHERE id = ? AND owner_id = ?
             """,
             (*values, character_id, session["user_id"]),
@@ -458,14 +485,15 @@ def update_character(character_id):
 def get_character(character_id):
     return get_db().execute(
         """
-        SELECT c.id, c.owner_id, c.avatar_url, c.is_preset, c.created_at,
+        SELECT c.id, c.owner_id, c.is_preset, c.created_at,
             COALESCE(o.name, c.name) AS name,
             COALESCE(o.tagline, c.tagline) AS tagline,
             COALESCE(o.persona, c.persona) AS persona,
             COALESCE(o.background, c.background) AS background,
             COALESCE(o.memory, c.memory) AS memory,
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
-            COALESCE(o.voice_name, c.voice_name) AS voice_name
+            COALESCE(o.voice_name, c.voice_name) AS voice_name,
+            COALESCE(o.avatar_url, c.avatar_url) AS avatar_url
         FROM characters c
         LEFT JOIN character_overrides o ON o.character_id = c.id AND o.user_id = ?
         WHERE c.id = ? AND (c.is_preset = 1 OR c.owner_id = ?)

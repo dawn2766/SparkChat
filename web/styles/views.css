@@ -148,22 +148,123 @@
   background: linear-gradient(145deg, #56615e, #202625);
 }
 
-.avatar.megatron::after {
-  content: "";
-  width: 13px;
-  height: 3px;
-  position: absolute;
-  top: 18px;
-  background: var(--danger);
-  box-shadow: 0 0 10px var(--danger);
-}
-
 .avatar.small {
   width: 40px;
   height: 40px;
   flex-basis: 40px;
   font-size: 11px;
 }
+
+.avatar img,
+.avatar-field-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.avatar-field {
+  margin-bottom: 24px;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-field-preview {
+  width: 58px;
+  height: 58px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.avatar-placeholder {
+  font: 300 24px var(--font-ui);
+}
+
+.avatar-field-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.avatar-field-copy strong {
+  font-size: 12px;
+}
+
+.avatar-field-copy span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.avatar-choose {
+  min-height: 38px;
+  padding-inline: 12px;
+  cursor: pointer;
+}
+
+.crop-dialog {
+  width: min(92vw, 480px);
+}
+
+.crop-dialog-body {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+}
+
+.crop-stage {
+  width: min(360px, calc(100vw - 72px));
+  aspect-ratio: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background:
+    linear-gradient(45deg, #202625 25%, transparent 25%, transparent 75%, #202625 75%),
+    linear-gradient(45deg, #202625 25%, #171b1b 25%, #171b1b 75%, #202625 75%);
+  background-position: 0 0, 8px 8px;
+  background-size: 16px 16px;
+}
+
+.crop-stage.dragging {
+  cursor: grabbing;
+}
+
+.crop-stage > img {
+  position: absolute;
+  max-width: none;
+  user-select: none;
+}
+
+.crop-box {
+  width: 180px;
+  height: 180px;
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  touch-action: none;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 999px rgb(5 7 7 / 55%);
+}
+
+.crop-box i {
+  width: 12px;
+  height: 12px;
+  position: absolute;
+  border-color: var(--ink);
+  border-style: solid;
+}
+
+.crop-box i:nth-child(1) { top: -2px; left: -2px; border-width: 2px 0 0 2px; }
+.crop-box i:nth-child(2) { top: -2px; right: -2px; border-width: 2px 2px 0 0; }
+.crop-box i:nth-child(3) { right: -2px; bottom: -2px; border-width: 0 2px 2px 0; }
+.crop-box i:nth-child(4) { bottom: -2px; left: -2px; border-width: 0 0 2px 2px; }
 
 .contact-main {
   min-width: 0;

@@ -1,6 +1,7 @@
 import { createIcons, Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
+import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
@@ -136,6 +137,7 @@ function settingsMarkup(character) {
     <form class="dialog-panel" id="character-form">
       <header class="dialog-header"><div><h2>角色配置</h2></div></header>
       <div class="dialog-body">
+        ${avatarFieldMarkup({ currentUrl: character.avatarUrl, id: "edit-avatar" })}
         <div class="field"><label for="edit-name">角色名称</label><input class="text-input" id="edit-name" name="name" maxlength="40" required value="${esc(character.name)}"></div>
         <div class="field"><label for="edit-persona">身份背景</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
         <div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>
@@ -148,11 +150,14 @@ function settingsMarkup(character) {
 function bindSettings(onBack) {
   const dialog = document.querySelector("#character-dialog");
   const form = document.querySelector("#character-form");
+  bindAvatarEditor(form);
   const resetForm = () => {
     form.name.value = state.active.name;
     form.persona.value = state.active.persona;
     form.voiceId.value = state.active.voiceId;
     form.voiceName.value = state.active.voiceName;
+    form.avatarUrl.value = state.active.avatarUrl || "";
+    form.querySelector("[data-avatar-editor]").resetAvatar(state.active.avatarUrl || "");
     resetTextareaSize(form.persona);
   };
   const cancelSettings = () => {

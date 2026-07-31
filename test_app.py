@@ -131,9 +131,11 @@ class SparkChatApiTest(unittest.TestCase):
                 "memory": "测试记忆。",
                 "voiceId": "archive",
                 "voiceName": "方舟档案员",
+                "avatarUrl": "data:image/webp;base64,UklGRg==",
             },
         )
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json["character"]["avatarUrl"], "data:image/webp;base64,UklGRg==")
         character_id = response.json["character"]["id"]
         self.client.post("/api/auth/logout")
         self.client.post("/api/auth/register", json={"username": "AnotherUser", "password": "1234"})
@@ -184,19 +186,22 @@ class SparkChatApiTest(unittest.TestCase):
                 "memory": "新的记忆。",
                 "voiceId": "ironvow",
                 "voiceName": "钢铁誓言",
+                "avatarUrl": "data:image/webp;base64,V0VCUA==",
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["character"]["name"], "已修改角色")
         self.assertEqual(response.json["character"]["voiceId"], "ironvow")
+        self.assertEqual(response.json["character"]["avatarUrl"], "data:image/webp;base64,V0VCUA==")
 
         preset_id = self.client.get("/api/characters").json["characters"][0]["id"]
         overridden = self.client.patch(
             f"/api/characters/{preset_id}",
-            json={"name": "修改预设", "persona": "无", "voiceId": "archive", "voiceName": "方舟档案员"},
+            json={"name": "修改预设", "persona": "无", "voiceId": "archive", "voiceName": "方舟档案员", "avatarUrl": "data:image/webp;base64,UFJFU0VU"},
         )
         self.assertEqual(overridden.status_code, 200)
         self.assertEqual(overridden.json["character"]["name"], "修改预设")
+        self.assertEqual(overridden.json["character"]["avatarUrl"], "data:image/webp;base64,UFJFU0VU")
 
         other_client = self.app.test_client()
         other_client.post("/api/auth/register", json={"username": "OverrideIsolation", "password": "1234"})

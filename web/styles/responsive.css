@@ -70,6 +70,11 @@
   .dialog-body {
     padding: 16px;
   }
+
+  .avatar-field {
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
