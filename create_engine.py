@@ -13,10 +13,7 @@ async def main():
         raise RuntimeError("SPEECH_ENGINE_WS_URL is missing from .env")
 
     elevenlabs = AsyncElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-    speech_engine = {
-        "ws_url": ws_url,
-        "request_headers": {"ngrok-skip-browser-warning": "true"},
-    }
+    speech_engine = {"ws_url": ws_url}
     engine_id = os.getenv("SPEECH_ENGINE_ID")
 
     if engine_id:
