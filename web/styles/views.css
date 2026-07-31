@@ -246,6 +246,7 @@
 .app-dialog {
   width: min(92vw, 540px);
   max-height: min(88vh, 720px);
+  overflow: hidden;
   padding: 0;
   color: var(--ink);
   border: 1px solid var(--line-strong);
@@ -263,6 +264,7 @@
   max-height: min(88vh, 720px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .dialog-header,
@@ -626,6 +628,7 @@
 .composer {
   display: grid;
   grid-template-columns: 42px 1fr 42px;
+  align-items: end;
   gap: 8px;
   padding: 11px 13px max(11px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
@@ -633,8 +636,10 @@
 }
 
 .composer textarea {
+  height: 42px;
   min-height: 42px;
   max-height: 110px;
+  overflow-y: hidden;
   padding: 10px 11px;
   resize: none;
 }

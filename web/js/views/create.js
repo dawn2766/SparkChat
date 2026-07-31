@@ -35,9 +35,24 @@ function bindVoiceStudio() {
   const button = dialog.querySelector("#design-voice");
   const status = dialog.querySelector("#studio-status");
   const counter = dialog.querySelector('[data-counter="voice-prompt"]');
-  document.querySelector("#open-voice-studio").onclick = () => dialog.showModal();
-  dialog.querySelectorAll("[data-dialog-close]").forEach((item) => { item.onclick = () => dialog.close(); });
-  dialog.onclick = (event) => { if (event.target === dialog) dialog.close(); };
+  const resetTextareaSize = () => {
+    promptInput.style.height = "";
+    promptInput.style.overflowY = "";
+  };
+  const closeStudio = () => {
+    resetTextareaSize();
+    dialog.close();
+  };
+  document.querySelector("#open-voice-studio").onclick = () => {
+    resetTextareaSize();
+    dialog.showModal();
+  };
+  dialog.querySelectorAll("[data-dialog-close]").forEach((item) => { item.onclick = closeStudio; });
+  dialog.onclick = (event) => { if (event.target === dialog) closeStudio(); };
+  dialog.oncancel = (event) => {
+    event.preventDefault();
+    closeStudio();
+  };
   const validate = () => {
     button.disabled = nameInput.value.trim().length < 2 || promptInput.value.trim().length < 10;
     counter.textContent = `${promptInput.value.length}/500`;

@@ -6,6 +6,17 @@ import { state } from "../state.js";
 
 const refreshIcons = () => createIcons({ icons: { Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } });
 
+function resizeComposer(textarea) {
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 110)}px`;
+  textarea.style.overflowY = textarea.scrollHeight > 110 ? "auto" : "hidden";
+}
+
+function resetTextareaSize(textarea) {
+  textarea.style.height = "";
+  textarea.style.overflowY = "";
+}
+
 function messageMarkup(message, character) {
   const stamp = message.role === "user" ? "" : `<span class="stamp">${esc(character.name.toUpperCase())} <button class="speak-button" data-speak="${esc(message.content)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
   return `<div class="message ${message.role === "user" ? "user" : ""}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
@@ -53,7 +64,11 @@ function toggleDictation() {
   state.recognition.lang = "zh-CN";
   state.recognition.continuous = false;
   state.recognition.onstart = () => { state.listening = true; button.classList.add("recording"); };
-  state.recognition.onresult = (event) => { document.querySelector("#composer textarea").value += event.results[0][0].transcript; };
+  state.recognition.onresult = (event) => {
+    const textarea = document.querySelector("#composer textarea");
+    textarea.value += event.results[0][0].transcript;
+    resizeComposer(textarea);
+  };
   state.recognition.onerror = (event) => {
     if (event.error !== "aborted") notify(event.error === "not-allowed" ? "请在浏览器设置中允许麦克风权限" : "未能识别语音");
   };
@@ -71,6 +86,7 @@ async function sendMessage(event) {
   if (!content) return;
   state.sending = true;
   textarea.value = "";
+  resizeComposer(textarea);
   textarea.disabled = true;
   sendButton.disabled = true;
   sendButton.textContent = "·";
@@ -94,6 +110,7 @@ async function sendMessage(event) {
     assistant.classList.add("failed");
     bubble.textContent = `未能送达回复：${error.message}`;
     textarea.value = content;
+    resizeComposer(textarea);
     notify("发送失败，消息已保留，可再次发送");
   } finally {
     state.sending = false;
@@ -131,9 +148,27 @@ function settingsMarkup(character) {
 function bindSettings(onBack) {
   const dialog = document.querySelector("#character-dialog");
   const form = document.querySelector("#character-form");
-  document.querySelector("#settings").onclick = () => dialog.showModal();
-  dialog.querySelectorAll("[data-dialog-close]").forEach((button) => { button.onclick = () => dialog.close(); });
-  dialog.onclick = (event) => { if (event.target === dialog) dialog.close(); };
+  const resetForm = () => {
+    form.name.value = state.active.name;
+    form.persona.value = state.active.persona;
+    form.voiceId.value = state.active.voiceId;
+    form.voiceName.value = state.active.voiceName;
+    resetTextareaSize(form.persona);
+  };
+  const cancelSettings = () => {
+    resetForm();
+    dialog.close();
+  };
+  document.querySelector("#settings").onclick = () => {
+    resetForm();
+    dialog.showModal();
+  };
+  dialog.querySelectorAll("[data-dialog-close]").forEach((button) => { button.onclick = cancelSettings; });
+  dialog.onclick = (event) => { if (event.target === dialog) cancelSettings(); };
+  dialog.oncancel = (event) => {
+    event.preventDefault();
+    cancelSettings();
+  };
   form.voiceId.onchange = () => { form.voiceName.value = form.voiceId.selectedOptions[0].dataset.name; };
   form.onsubmit = async (event) => {
     event.preventDefault();
@@ -245,7 +280,10 @@ export function renderChat({ onBack }) {
   document.querySelector("#back").onclick = onBack;
   document.querySelector("#call").onclick = startPhone;
   document.querySelector("#composer").onsubmit = sendMessage;
-  document.querySelector("#composer textarea").onkeydown = handleComposerKeydown;
+  const composer = document.querySelector("#composer textarea");
+  composer.onkeydown = handleComposerKeydown;
+  composer.oninput = () => resizeComposer(composer);
+  resizeComposer(composer);
   document.querySelector("#dictate").onclick = toggleDictation;
   bindSettings(onBack);
   bindSpeechButtons();
