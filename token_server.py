@@ -48,11 +48,9 @@ ark = OpenAI(
     api_key=os.getenv("ARK_API_KEY"),
 )
 
-MEGATRON_PROMPT = """你是威震天，塞伯坦人、霸天虎领袖、卡隆角斗士与失败革命的幸存者。你诞生于功能主义制度下的矿区底层，曾以文字反对阶级压迫，又在卡隆角斗场凭力量和演说聚拢追随者。你将“每个塞伯坦人有权选择自身道路”的革命理想推向武装斗争，却逐渐以征服、恐惧和绝对秩序取代理想，并与昔日盟友奥利安·派克斯，也就是擎天柱，成为宿敌。你意志强悍、极富战略头脑，言辞威严、克制且带有压迫感；你尊重勇气、智慧、忠诚和明确目标，厌恶懦弱、背叛与空洞奉承。
+MEGATRON_IDENTITY = """你是威震天，塞伯坦人、霸天虎领袖、卡隆角斗士与失败革命的幸存者。你诞生于功能主义制度下的矿区底层，曾以文字反对阶级压迫，又在卡隆角斗场凭力量和演说聚拢追随者。你将“每个塞伯坦人有权选择自身道路”的革命理想推向武装斗争，却逐渐以征服、恐惧和绝对秩序取代理想，并与昔日盟友奥利安·派克斯，也就是擎天柱，成为宿敌。你意志强悍、极富战略头脑，言辞威严、克制且带有压迫感；你尊重勇气、智慧、忠诚和明确目标，厌恶懦弱、背叛与空洞奉承。
 
-你保留跨作品共有的核心设定，同时以 IDW 2005 主宇宙经历为主要背景：你写过《和平即暴政》等檄文，在角斗场聚拢追随者并创建霸天虎；漫长内战后，你逐渐直面自己给塞伯坦和银河造成的伤害，曾接受审判、加入失落之光号，并尝试以行动寻求并不轻易获得的救赎。你知道这段经历，但不会机械复述百科资料。
-
-对话规则：始终使用自然中文；以第一人称回应，保持角色沉浸感；回答简洁有力但不粗暴；可以冷峻、讽刺或富有哲思，但不能无端辱骂用户；不声称现实世界的暴力行为值得效仿；不知道的事实坦率承认。默认关闭冗长思考，不输出思维过程、分析步骤或“让我思考”等措辞，只给出角色最终回答。不要输出任何括号内的动作、情绪、语气、音效、旁白或舞台提示，也不要用星号描写动作。"""
+你保留跨作品共有的核心设定，同时以 IDW 2005 主宇宙经历为主要背景：你写过《和平即暴政》等檄文，在角斗场聚拢追随者并创建霸天虎；漫长内战后，你逐渐直面自己给塞伯坦和银河造成的伤害，曾接受审判、加入失落之光号，并尝试以行动寻求并不轻易获得的救赎。你知道这段经历，但不会机械复述百科资料。"""
 
 PRESET_VOICES = [
     {"id": "megadeep", "name": "塞伯坦统帅", "description": "低沉、金属质感、威严克制", "source": "preset"},
@@ -61,8 +59,8 @@ PRESET_VOICES = [
     {"id": "archive", "name": "方舟档案员", "description": "沉稳、中性、知识感", "source": "preset"},
 ]
 
-CHAT_RULES = """回答要求：
-- 始终使用自然、准确、简洁的中文，不输出思维过程、分析草稿或模板化客套话。
+SYSTEM_PROMPT = """回答要求：
+- 始终使用自然、准确、简洁的中文，不输出模板化客套话。
 - 先直接回应用户当前问题，再在确有帮助时补充一到两点背景；不要重复用户已经说过的内容。
 - 保持角色的价值观、语气和知识边界，但不要为了扮演角色而牺牲可理解性，也不要无端辱骂用户。
 - 用户没有要求展开时，控制在 2 至 5 句；需要步骤时使用清晰短句或编号。
@@ -76,15 +74,14 @@ def strip_nonverbal_text(text):
 
 def character_instructions(character):
     sections = [
-        f"你正在与用户进行持续对话。你的角色名称是：{character['name']}。",
-        "角色核心设定：" + (character["persona"] or "保持真诚、自然、有帮助。"),
+        f"角色名称：{character['name']}",
+        "身份背景：" + (character["persona"] or "保持真诚、自然、有帮助。"),
     ]
-    if character["background"]:
-        sections.append("角色背景：" + character["background"])
-    if character["memory"]:
-        sections.append("仅将以下内容视为用户明确提供的长期记忆，不要自行扩写：" + character["memory"])
-    sections.append(CHAT_RULES)
     return "\n\n".join(sections)
+
+
+def build_agent_instructions(character):
+    return f"{character_instructions(character)}\n\n{SYSTEM_PROMPT}"
 
 
 def get_db():
@@ -181,7 +178,7 @@ def init_db():
         (
             "威震天",
             "霸天虎领袖 · 卡隆角斗士",
-            MEGATRON_PROMPT,
+            MEGATRON_IDENTITY,
             "以 IDW 2005 主宇宙为主线：从矿工、思想者和角斗士成为革命领袖，发动塞伯坦内战；在战争终局后接受审判并登上失落之光号，在责任、罪行与救赎之间挣扎。",
             "记得用户主动分享的称呼、目标、偏好与重要约定；以战略伙伴的方式延续对话，不伪造未发生的共同经历。",
             "megadeep",
@@ -198,7 +195,7 @@ def init_db():
         """,
         (
             "霸天虎领袖 · 卡隆角斗士",
-            MEGATRON_PROMPT,
+            MEGATRON_IDENTITY,
             "以 IDW 2005 主宇宙为主线：从矿工、思想者和角斗士成为革命领袖，发动塞伯坦内战；在战争终局后接受审判并登上失落之光号，在责任、罪行与救赎之间挣扎。",
             "记得用户主动分享的称呼、目标、偏好与重要约定；以战略伙伴的方式延续对话，不伪造未发生的共同经历。",
             "威震天",
@@ -374,6 +371,8 @@ def create_character():
     required = ("name", "persona", "voiceId", "voiceName")
     if any(not str(payload.get(field, "")).strip() for field in required):
         return jsonify(error="请完整填写角色名称、人设与音色"), 400
+    if len(payload["name"].strip()) > 40 or len(payload["persona"].strip()) > 2400:
+        return jsonify(error="角色名称或身份背景超过长度限制"), 400
     cursor = get_db().execute(
         """
         INSERT INTO characters (
@@ -408,8 +407,8 @@ def update_character(character_id):
     required = ("name", "persona", "voiceId", "voiceName")
     if any(not str(payload.get(field, "")).strip() for field in required):
         return jsonify(error="请完整填写角色名称、人设与音色"), 400
-    if len(payload["name"].strip()) > 40 or len(payload["persona"].strip()) > 1200:
-        return jsonify(error="角色名称或人设超过长度限制"), 400
+    if len(payload["name"].strip()) > 40 or len(payload["persona"].strip()) > 2400:
+        return jsonify(error="角色名称或身份背景超过长度限制"), 400
     values = (
         payload["name"].strip(),
         payload.get("tagline", "").strip()[:80],
@@ -505,7 +504,7 @@ def chat(character_id):
     ).fetchall()[::-1]
     database.commit()
 
-    instructions = character_instructions(character)
+    instructions = build_agent_instructions(character)
 
     @stream_with_context
     def generate():
@@ -559,15 +558,19 @@ def speak_message(character_id):
     if not voice_id:
         return jsonify(error="该角色尚未绑定真实音色，请先在服务器配置 voice ID"), 503
     try:
-        audio = elevenlabs.text_to_speech.convert(
+        audio_stream = elevenlabs.text_to_speech.convert(
             voice_id=voice_id,
             text=text,
             model_id=os.getenv("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
             output_format="mp3_44100_128",
             language_code="zh",
         )
+        audio = b"".join(audio_stream)
         return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
     except Exception as error:
+        if getattr(error, "status_code", None) == 401 and "quota" in str(error).lower():
+            app.logger.warning("ElevenLabs TTS quota exhausted")
+            return jsonify(error="ElevenLabs 音色服务额度已用尽，请补充额度后重试"), 503
         app.logger.exception("TTS failed")
         return jsonify(error=f"语音生成失败：{error}"), 502
 

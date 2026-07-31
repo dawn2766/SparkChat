@@ -43,6 +43,72 @@ class SparkChatApiTest(unittest.TestCase):
             "准备行动。 现在出发。",
         )
 
+    def test_speech_quota_error_returns_service_unavailable(self):
+        import token_server
+
+        class QuotaError(Exception):
+            status_code = 401
+
+        class FakeTextToSpeech:
+            @staticmethod
+            def convert(**_kwargs):
+                def stream():
+                    raise QuotaError("quota_exceeded")
+                    yield b""
+
+                return stream()
+
+        class FakeElevenLabs:
+            text_to_speech = FakeTextToSpeech()
+
+        original_client = token_server.elevenlabs
+        original_key = os.environ.get("ELEVENLABS_API_KEY")
+        original_voice = os.environ.get("SPARKCHAT_VOICE_MEGADEEP")
+        try:
+            token_server.elevenlabs = FakeElevenLabs()
+            os.environ["ELEVENLABS_API_KEY"] = "test-key"
+            os.environ["SPARKCHAT_VOICE_MEGADEEP"] = "test-voice"
+            self.login()
+            response = self.client.post(
+                "/api/characters/1/speak", json={"text": "测试朗读"}
+            )
+            self.assertEqual(response.status_code, 503)
+            self.assertIn("额度已用尽", response.json["error"])
+        finally:
+            token_server.elevenlabs = original_client
+            if original_key is None:
+                os.environ.pop("ELEVENLABS_API_KEY", None)
+            else:
+                os.environ["ELEVENLABS_API_KEY"] = original_key
+            if original_voice is None:
+                os.environ.pop("SPARKCHAT_VOICE_MEGADEEP", None)
+            else:
+                os.environ["SPARKCHAT_VOICE_MEGADEEP"] = original_voice
+
+    def test_character_prompt_contains_only_character_context(self):
+        from token_server import SYSTEM_PROMPT, build_agent_instructions, character_instructions
+
+        prompt = character_instructions({
+            "name": "测试角色",
+            "persona": "身份设定",
+            "background": "背景经历",
+            "memory": "用户记忆",
+        })
+        self.assertIn("角色名称：测试角色", prompt)
+        self.assertIn("身份背景：身份设定", prompt)
+        self.assertNotIn("回答要求：", prompt)
+        self.assertNotIn("思维过程", prompt)
+        self.assertIn("回答要求：", SYSTEM_PROMPT)
+        self.assertNotIn("思维过程", SYSTEM_PROMPT)
+        final_prompt = build_agent_instructions({
+            "name": "测试角色",
+            "persona": "身份设定",
+            "background": "",
+            "memory": "",
+        })
+        self.assertLess(final_prompt.index("身份背景：身份设定"), final_prompt.index("回答要求："))
+        self.assertNotIn("用户记忆", final_prompt)
+
     def test_session_cookie_survives_new_client(self):
         self.login()
         cookie = next(cookie for cookie in self.client.get_cookie("session").value.split(";") if cookie)
