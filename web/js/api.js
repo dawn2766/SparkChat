@@ -9,7 +9,13 @@ export async function api(url, options = {}) {
     ...options,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error || "请求失败");
+  if (!response.ok) {
+    if (data.actionUrl) window.open(data.actionUrl, "_blank", "noopener,noreferrer");
+    const error = Error(data.error || "请求失败");
+    error.actionUrl = data.actionUrl;
+    error.logId = data.logId;
+    throw error;
+  }
   return data;
 }
 

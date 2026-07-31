@@ -46,41 +46,89 @@ class SparkChatApiTest(unittest.TestCase):
 
     def test_speech_quota_error_returns_service_unavailable(self):
         import token_server
+        from doubao_speech import DoubaoSpeechError
 
-        class QuotaError(Exception):
-            status_code = 401
+        class FakeDoubaoSpeech:
+            configured = True
 
-        class FakeTextToSpeech:
             @staticmethod
-            def convert(**_kwargs):
-                def stream():
-                    raise QuotaError("quota_exceeded")
-                    yield b""
+            def synthesize(_voice_id, _text):
+                raise DoubaoSpeechError("quota exceeded", status_code=429)
 
-                return stream()
-
-        class FakeElevenLabs:
-            text_to_speech = FakeTextToSpeech()
-
-        original_client = token_server.elevenlabs
-        original_key = os.environ.get("ELEVENLABS_API_KEY")
+        original_client = token_server.doubao_speech
         original_voice = os.environ.get("SPARKCHAT_VOICE_MEGADEEP")
         try:
-            token_server.elevenlabs = FakeElevenLabs()
-            os.environ["ELEVENLABS_API_KEY"] = "test-key"
-            os.environ["SPARKCHAT_VOICE_MEGADEEP"] = "test-voice"
+            token_server.doubao_speech = FakeDoubaoSpeech()
+            os.environ["SPARKCHAT_VOICE_MEGADEEP"] = "S_test_voice"
             self.login()
             response = self.client.post(
                 "/api/characters/1/speak", json={"text": "测试朗读"}
             )
             self.assertEqual(response.status_code, 503)
-            self.assertIn("额度已用尽", response.json["error"])
+            self.assertIn("额度", response.json["error"])
+            self.assertEqual(response.json["actionUrl"], "https://console.volcengine.com/speech/new")
         finally:
-            token_server.elevenlabs = original_client
-            if original_key is None:
-                os.environ.pop("ELEVENLABS_API_KEY", None)
+            token_server.doubao_speech = original_client
+            if original_voice is None:
+                os.environ.pop("SPARKCHAT_VOICE_MEGADEEP", None)
             else:
-                os.environ["ELEVENLABS_API_KEY"] = original_key
+                os.environ["SPARKCHAT_VOICE_MEGADEEP"] = original_voice
+
+    def test_speech_authorization_error_returns_console_link(self):
+        import token_server
+        from doubao_speech import DoubaoSpeechError
+
+        class UnauthorizedDoubaoSpeech:
+            configured = True
+
+            @staticmethod
+            def synthesize(_voice_id, _text):
+                raise DoubaoSpeechError("unauthorized resource", status_code=403)
+
+        original_client = token_server.doubao_speech
+        original_voice = os.environ.get("SPARKCHAT_VOICE_MEGADEEP")
+        try:
+            token_server.doubao_speech = UnauthorizedDoubaoSpeech()
+            os.environ["SPARKCHAT_VOICE_MEGADEEP"] = "S_test_voice"
+            self.login()
+            response = self.client.post(
+                "/api/characters/1/speak", json={"text": "测试朗读"}
+            )
+            self.assertEqual(response.status_code, 503)
+            self.assertIn("尚未授权", response.json["error"])
+            self.assertEqual(response.json["actionUrl"], "https://console.volcengine.com/speech/new")
+        finally:
+            token_server.doubao_speech = original_client
+            if original_voice is None:
+                os.environ.pop("SPARKCHAT_VOICE_MEGADEEP", None)
+            else:
+                os.environ["SPARKCHAT_VOICE_MEGADEEP"] = original_voice
+
+    def test_sse_api_key_error_returns_console_link(self):
+        import token_server
+        from doubao_speech import DoubaoSpeechError
+
+        class InvalidKeySpeech:
+            configured = True
+
+            @staticmethod
+            def synthesize(_voice_id, _text):
+                raise DoubaoSpeechError("Invalid X-Api-Key", code=45000010)
+
+        original_client = token_server.doubao_speech
+        original_voice = os.environ.get("SPARKCHAT_VOICE_MEGADEEP")
+        try:
+            token_server.doubao_speech = InvalidKeySpeech()
+            os.environ["SPARKCHAT_VOICE_MEGADEEP"] = "S_test_voice"
+            self.login()
+            response = self.client.post(
+                "/api/characters/1/speak", json={"text": "测试朗读"}
+            )
+            self.assertEqual(response.status_code, 503)
+            self.assertIn("尚未授权", response.json["error"])
+            self.assertEqual(response.json["actionUrl"], "https://console.volcengine.com/speech/new")
+        finally:
+            token_server.doubao_speech = original_client
             if original_voice is None:
                 os.environ.pop("SPARKCHAT_VOICE_MEGADEEP", None)
             else:
@@ -129,8 +177,8 @@ class SparkChatApiTest(unittest.TestCase):
                 "persona": "保持简洁。",
                 "background": "测试背景。",
                 "memory": "测试记忆。",
-                "voiceId": "archive",
-                "voiceName": "方舟档案员",
+                "voiceId": "S_test_custom",
+                "voiceName": "豆包测试音色",
                 "avatarUrl": "data:image/webp;base64,UklGRg==",
             },
         )
@@ -148,21 +196,42 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(self.client.post("/api/auth/logout").status_code, 200)
         self.assertEqual(self.client.get("/api/characters").status_code, 401)
 
-    def test_custom_character_cannot_use_preset_call_engine(self):
+    def test_custom_character_can_use_doubao_realtime_voice(self):
+        import token_server
+
         self.login()
         response = self.client.post(
             "/api/characters",
             json={
                 "name": "电话隔离测试",
                 "persona": "保持自然。",
-                "voiceId": "archive",
-                "voiceName": "方舟档案员",
+                "voiceId": "S_test_custom",
+                "voiceName": "豆包测试音色",
             },
         )
         self.assertEqual(response.status_code, 201)
         character_id = response.json["character"]["id"]
-        token_response = self.client.get(f"/api/token?characterId={character_id}")
-        self.assertEqual(token_response.status_code, 409)
+        original_client = token_server.doubao_speech
+        original_app_id = os.environ.get("DOUBAO_SPEECH_APP_ID")
+        original_access_key = os.environ.get("DOUBAO_SPEECH_ACCESS_KEY")
+        try:
+            token_server.doubao_speech = type("ConfiguredSpeech", (), {"configured": True})()
+            os.environ["DOUBAO_SPEECH_APP_ID"] = "test-app-id"
+            os.environ["DOUBAO_SPEECH_ACCESS_KEY"] = "test-access-key"
+            token_response = self.client.get(f"/api/token?characterId={character_id}")
+            self.assertEqual(token_response.status_code, 200)
+            self.assertEqual(token_response.json["speakerId"], "S_test_custom")
+            self.assertEqual(token_response.json["characterId"], character_id)
+        finally:
+            token_server.doubao_speech = original_client
+            if original_app_id is None:
+                os.environ.pop("DOUBAO_SPEECH_APP_ID", None)
+            else:
+                os.environ["DOUBAO_SPEECH_APP_ID"] = original_app_id
+            if original_access_key is None:
+                os.environ.pop("DOUBAO_SPEECH_ACCESS_KEY", None)
+            else:
+                os.environ["DOUBAO_SPEECH_ACCESS_KEY"] = original_access_key
 
     def test_user_can_update_custom_and_override_preset_character(self):
         self.login()

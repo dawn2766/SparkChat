@@ -12,10 +12,7 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from openai import OpenAI
 from werkzeug.security import check_password_hash, generate_password_hash
 
-try:
-    from elevenlabs import ElevenLabs
-except ImportError:
-    ElevenLabs = None
+from doubao_speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL
 
 load_dotenv(override=True)
 
@@ -42,7 +39,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "false").lower() == "true",
 )
 
-elevenlabs = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY")) if ElevenLabs else None
+doubao_speech = DoubaoSpeechClient()
 ark = OpenAI(
     base_url="https://ark.cn-beijing.volces.com/api/v3",
     api_key=os.getenv("ARK_API_KEY"),
@@ -71,6 +68,56 @@ def strip_nonverbal_text(text):
     cleaned = re.sub(r"（[^（）]*）|\([^()]*\)|\[[^\[\]]*\]|【[^【】]*】", "", text)
     cleaned = re.sub(r"\*[^*]+\*", "", cleaned)
     return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
+def speech_error_response(error, action):
+    app.logger.warning("Doubao speech %s failed: %s", action, error)
+    payload = {"error": f"豆包语音{action}失败：{error}"}
+    if error.log_id:
+        payload["logId"] = error.log_id
+    if error.requires_authorization:
+        payload.update(
+            error="豆包语音能力尚未授权或开通，请前往控制台处理后重试",
+            actionUrl=SPEECH_CONSOLE_URL,
+        )
+        return jsonify(payload), 503
+    if error.status_code == 429 or "quota" in str(error).lower() or "额度" in str(error):
+        payload["error"] = "豆包语音额度或并发已用尽，请前往控制台处理后重试"
+        payload["actionUrl"] = SPEECH_CONSOLE_URL
+        return jsonify(payload), 503
+    return jsonify(payload), 502
+
+
+def available_voice_design_speaker_id():
+    configured_ids = [
+        speaker_id.strip()
+        for speaker_id in os.getenv("DOUBAO_VOICE_DESIGN_SPEAKER_IDS", "").split(",")
+        if speaker_id.strip()
+    ]
+    if not configured_ids:
+        return None
+    used_ids = {
+        row["voice_id"] for row in get_db().execute("SELECT voice_id FROM voices").fetchall()
+    }
+    return next((speaker_id for speaker_id in configured_ids if speaker_id not in used_ids), None)
+
+
+def doubao_speaker_id(character):
+    configured = os.getenv(f"SPARKCHAT_VOICE_{character['voice_id'].upper()}", "").strip()
+    if configured:
+        return configured
+    if character["voice_id"].startswith(("S_", "ICL_", "saturn_")):
+        return character["voice_id"]
+    return None
+
+
+def doubao_realtime_speaker_id(character):
+    configured = os.getenv(
+        f"SPARKCHAT_REALTIME_VOICE_{character['voice_id'].upper()}", ""
+    ).strip()
+    if configured:
+        return configured
+    return doubao_speaker_id(character)
 
 def character_instructions(character):
     sections = [
@@ -324,32 +371,34 @@ def design_voice():
     payload = request.get_json(silent=True) or {}
     name = payload.get("name", "").strip()
     prompt = payload.get("prompt", "").strip()
-    if len(name) < 2 or len(name) > 40 or len(prompt) < 10 or len(prompt) > 500:
-        return jsonify(error="音色名称需为 2 至 40 字，提示词需为 10 至 500 字"), 400
-    if elevenlabs is None or not os.getenv("ELEVENLABS_API_KEY"):
-        return jsonify(error="服务器尚未安装或配置 ElevenLabs"), 503
+    if len(name) < 2 or len(name) > 40 or len(prompt) < 10 or len(prompt) > 200:
+        return jsonify(error="音色名称需为 2 至 40 字，提示词需为 10 至 200 字"), 400
+    speaker_id = available_voice_design_speaker_id()
+    if not doubao_speech.configured:
+        return jsonify(error="服务器尚未配置豆包语音", actionUrl=SPEECH_CONSOLE_URL), 503
+    if not speaker_id:
+        return jsonify(
+            error="没有可用的豆包音色设计 speaker ID，请在控制台购买并配置资源",
+            actionUrl=SPEECH_CONSOLE_URL,
+        ), 503
     try:
-        design = elevenlabs.text_to_voice.design(
-            voice_description=prompt,
-            auto_generate_text=True,
-            should_enhance=True,
+        result = doubao_speech.design_voice(
+            speaker_id=speaker_id,
+            text_prompt=prompt,
+            preview_text="你好，我是你刚刚设计的专属角色音色。现在，让我们开始一段新的对话。",
         )
-        preview = design.previews[0]
-        voice = elevenlabs.text_to_voice.create(
-            voice_name=name,
-            voice_description=prompt,
-            generated_voice_id=preview.generated_voice_id,
-        )
-    except Exception as error:
-        app.logger.exception("Voice design failed")
-        return jsonify(error=f"音色生成失败：{error}"), 502
+    except DoubaoSpeechError as error:
+        return speech_error_response(error, "音色设计")
+    if result.get("status") not in {2, 4}:
+        return jsonify(error="豆包音色仍在训练中，请稍后重试", status=result.get("status")), 202
     get_db().execute(
         "INSERT OR REPLACE INTO voices (owner_id, voice_id, name, description) VALUES (?, ?, ?, ?)",
-        (session["user_id"], voice.voice_id, name, prompt),
+        (session["user_id"], speaker_id, name, prompt),
     )
     get_db().commit()
     return jsonify(
-        voice={"id": voice.voice_id, "name": name, "description": prompt, "source": "custom"}
+        voice={"id": speaker_id, "name": name, "description": prompt, "source": "custom"},
+        demoAudio=result.get("demo_audio"),
     ), 201
 
 
@@ -580,31 +629,18 @@ def speak_message(character_id):
     text = strip_nonverbal_text(payload.get("text", "").strip())
     if character is None:
         return jsonify(error="未找到该角色"), 404
-    voice_id = os.getenv(f"SPARKCHAT_VOICE_{character['voice_id'].upper()}")
-    if not voice_id and character["voice_id"] not in {voice["id"] for voice in PRESET_VOICES}:
-        voice_id = character["voice_id"]
+    voice_id = doubao_speaker_id(character)
     if not text or len(text) > 5000:
         return jsonify(error="朗读内容需为 1 至 5000 个字符"), 400
-    if elevenlabs is None or not os.getenv("ELEVENLABS_API_KEY"):
-        return jsonify(error="服务器尚未配置 ElevenLabs TTS"), 503
+    if not doubao_speech.configured:
+        return jsonify(error="服务器尚未配置豆包语音", actionUrl=SPEECH_CONSOLE_URL), 503
     if not voice_id:
         return jsonify(error="该角色尚未绑定真实音色，请先在服务器配置 voice ID"), 503
     try:
-        audio_stream = elevenlabs.text_to_speech.convert(
-            voice_id=voice_id,
-            text=text,
-            model_id=os.getenv("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
-            output_format="mp3_44100_128",
-            language_code="zh",
-        )
-        audio = b"".join(audio_stream)
-        return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
-    except Exception as error:
-        if getattr(error, "status_code", None) == 401 and "quota" in str(error).lower():
-            app.logger.warning("ElevenLabs TTS quota exhausted")
-            return jsonify(error="ElevenLabs 音色服务额度已用尽，请补充额度后重试"), 503
-        app.logger.exception("TTS failed")
-        return jsonify(error=f"语音生成失败：{error}"), 502
+        audio, content_type = doubao_speech.synthesize(voice_id, text)
+        return Response(audio, mimetype=content_type, headers={"Cache-Control": "no-store"})
+    except DoubaoSpeechError as error:
+        return speech_error_response(error, "合成")
 
 
 @app.get("/api/token")
@@ -614,13 +650,23 @@ def get_token():
     character = get_character(character_id) if character_id else None
     if character is None:
         return jsonify(error="未找到通话角色"), 404
-    if not character["is_preset"]:
-        return jsonify(error="该自定义角色尚未绑定独立实时语音引擎"), 409
-    speech_engine_id = os.getenv("SPEECH_ENGINE_ID")
-    if elevenlabs is None or not speech_engine_id:
-        return jsonify(error="ElevenLabs 或 SPEECH_ENGINE_ID 尚未配置"), 503
-    response = elevenlabs.conversational_ai.conversations.get_webrtc_token(agent_id=speech_engine_id)
-    return jsonify(token=response.token)
+    if not os.getenv("DOUBAO_SPEECH_APP_ID") or not os.getenv("DOUBAO_SPEECH_ACCESS_KEY"):
+        return jsonify(
+            error="豆包端到端实时语音需要配置 APP ID 和 Access Token",
+            actionUrl=SPEECH_CONSOLE_URL,
+        ), 503
+    speaker_id = doubao_realtime_speaker_id(character)
+    if not speaker_id:
+        return jsonify(
+            error="该角色尚未绑定豆包音色，请先完成音色设计或配置",
+            actionUrl=SPEECH_CONSOLE_URL,
+        ), 503
+    return jsonify(
+        websocketUrl=os.getenv("DOUBAO_REALTIME_PUBLIC_WS", "/sparkchat/realtime"),
+        resourceId=os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
+        speakerId=speaker_id,
+        characterId=character["id"],
+    )
 
 
 @app.get("/")

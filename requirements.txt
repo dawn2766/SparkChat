@@ -1,5 +1,5 @@
-elevenlabs
 flask
 gunicorn
 openai
 python-dotenv
+websockets

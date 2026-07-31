@@ -1,6 +1,6 @@
 import { createIcons, Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
-import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
+import { createRealtimeSession } from "../doubao-realtime.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
@@ -38,6 +38,7 @@ async function speak(text, button = null) {
     const response = await fetch(apiUrl(`/api/characters/${state.active.id}/speak`), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
+      if (data.actionUrl) window.open(data.actionUrl, "_blank", "noopener,noreferrer");
       throw Error(data.error || "语音生成失败");
     }
     const audio = new Audio(URL.createObjectURL(await response.blob()));
@@ -50,31 +51,42 @@ async function speak(text, button = null) {
   }
 }
 
-function toggleDictation() {
+async function toggleDictation() {
   const button = document.querySelector("#dictate");
-  if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-    notify("当前浏览器不支持语音转文字");
-    return;
-  }
   if (state.listening) {
-    state.recognition?.stop();
+    await state.conversation?.stop();
+    state.conversation = null;
+    state.listening = false;
+    button.classList.remove("recording");
     return;
   }
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  state.recognition = new Recognition();
-  state.recognition.lang = "zh-CN";
-  state.recognition.continuous = false;
-  state.recognition.onstart = () => { state.listening = true; button.classList.add("recording"); };
-  state.recognition.onresult = (event) => {
+  try {
+    state.listening = true;
+    button.classList.add("recording");
     const textarea = document.querySelector("#composer textarea");
-    textarea.value += event.results[0][0].transcript;
-    resizeComposer(textarea);
-  };
-  state.recognition.onerror = (event) => {
-    if (event.error !== "aborted") notify(event.error === "not-allowed" ? "请在浏览器设置中允许麦克风权限" : "未能识别语音");
-  };
-  state.recognition.onend = () => { state.listening = false; button.classList.remove("recording"); };
-  state.recognition.start();
+    const initialText = textarea.value;
+    let committedText = "";
+    state.conversation = await createRealtimeSession(state.active, {
+      onTranscript: (data) => {
+        if (!data.text) return;
+        textarea.value = initialText + committedText + data.text;
+        if (!data.interim) committedText += data.text;
+        resizeComposer(textarea);
+      },
+      onError: (error) => notify(error.message || "未能识别语音"),
+      onClose: () => {
+        state.listening = false;
+        button.classList.remove("recording");
+        if (state.conversation) state.conversation = null;
+      },
+    }, { playAudio: false });
+    await state.conversation.beginMicrophone();
+  } catch (error) {
+    notify(error.message || "无法启动豆包语音识别");
+    state.listening = false;
+    button.classList.remove("recording");
+    state.conversation = null;
+  }
 }
 
 async function sendMessage(event) {
@@ -216,7 +228,7 @@ async function startPhone() {
     const conversation = state.conversation;
     state.conversation = null;
     phone.remove();
-    if (conversation) await conversation.endSession();
+    if (conversation) await conversation.stop();
   };
   phone.querySelector("#end-call").onclick = close;
 
@@ -235,33 +247,28 @@ async function startPhone() {
     statusText.textContent = speaking ? "角色正在回应" : "正在聆听";
   };
   micButton.onclick = () => {
-    if (!state.conversation?.setMicMuted) return;
+    if (!state.conversation?.mute) return;
     muted = !muted;
-    state.conversation.setMicMuted(muted);
+    state.conversation.mute(muted);
     micButton.classList.toggle("muted", muted);
     micButton.setAttribute("aria-label", muted ? "打开麦克风" : "关闭麦克风");
     micButton.innerHTML = `<i data-lucide="${muted ? "mic-off" : "mic"}"></i>`;
     refreshIcons();
   };
   try {
-    const token = (await api(`/api/token?characterId=${state.active.id}`)).token;
-    if (cancelled) return;
-    const conversation = await Conversation.startSession({
-      conversationToken: token,
-      onConnect: () => setMode("listening"),
-      onModeChange: (mode) => setMode(mode.mode),
-      onMessage: (message) => {
-        if (message?.source === "ai" && message.message) subtitle.textContent = message.message.replace(/[*#_`\[\]]/g, "").slice(0, 160);
-      },
+    const conversation = await createRealtimeSession(state.active, {
+      onReady: () => setMode("listening"),
+      onText: (text) => { if (text) subtitle.textContent = text.slice(0, 160); },
+      onTranscript: () => setMode("listening"),
       onError: (error) => { subtitle.textContent = error?.message || "语音连接发生错误"; },
     });
     if (cancelled) {
-      await conversation.endSession();
+      await conversation.stop();
       return;
     }
     state.conversation = conversation;
-    micButton.disabled = typeof conversation.setMicMuted !== "function";
-    updateVolume();
+    micButton.disabled = false;
+    await conversation.beginMicrophone();
   } catch (error) {
     if (cancelled) return;
     phone.classList.remove("connecting", "listening", "speaking");

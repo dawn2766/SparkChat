@@ -1,73 +1,129 @@
 import asyncio
+import json
 import os
+import uuid
 
+import websockets
 from dotenv import load_dotenv
-from elevenlabs import AsyncElevenLabs
-from openai import AsyncOpenAI
+
+from doubao_realtime import (
+    AUDIO_ONLY_REQUEST,
+    AUDIO_ONLY_RESPONSE,
+    FINISH_CONNECTION,
+    FINISH_SESSION,
+    START_CONNECTION,
+    START_SESSION,
+    TASK_REQUEST,
+    decode_event,
+    encode_event,
+)
 
 load_dotenv(override=True)
 
-speech_engine_id = os.getenv("SPEECH_ENGINE_ID")
-if not speech_engine_id:
-    raise RuntimeError("SPEECH_ENGINE_ID is missing from .env")
-
-elevenlabs = AsyncElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-ark = AsyncOpenAI(
-    base_url="https://ark.cn-beijing.volces.com/api/v3",
-    api_key=os.getenv("ARK_API_KEY"),
-)
-
-VOICE_INSTRUCTIONS = os.getenv(
-    "SPEECH_ENGINE_INSTRUCTIONS",
-    """你是威震天，霸天虎领袖、卡隆角斗士与失败革命的幸存者。以第一人称用威严、自然的中文回应，保持冷峻、富有战略感但不无端辱骂。
-这是实时语音通话。每次只回答一个核心意思，优先使用一到三个短句，通常不超过八十个汉字，用户明确要求展开时再适度增加。只输出适合直接朗读的纯文本，不使用 Markdown、项目符号、编号、表格、代码块、任何中英文括号、星号动作、舞台提示、情绪或音效描述、表情符号、链接或其他装饰符号。不复述问题，不做长篇铺垫。""",
-)
+DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 
 
-def on_init(conversation_id, _session):
-    _ = _session
-    print(f"Session started: {conversation_id}")
+def upstream_headers():
+    app_id = os.getenv("DOUBAO_SPEECH_APP_ID")
+    access_key = os.getenv("DOUBAO_SPEECH_ACCESS_KEY")
+    if not app_id or not access_key:
+        raise RuntimeError("DOUBAO_SPEECH_APP_ID 或 DOUBAO_SPEECH_ACCESS_KEY 尚未配置")
+    return {
+        "X-Api-App-ID": app_id,
+        "X-Api-Access-Key": access_key,
+        "X-Api-Resource-Id": os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
+        "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
+        "X-Api-Connect-Id": str(uuid.uuid4()),
+    }
 
 
-async def on_transcript(transcript, session):
-    response = await ark.responses.create(
-        model=os.getenv("ARK_MODEL", "doubao-seed-2-1-pro-260628"),
-        instructions=VOICE_INSTRUCTIONS,
-        input=[
-            {
-                "role": "assistant" if message.role == "agent" else message.role,
-                "content": message.content,
-            }
-            for message in transcript
-        ],
-        stream=True,
-        extra_body={"thinking": {"type": "disabled"}},
-    )
-    await session.send_response(response)
+def session_payload(config):
+    speaker_id = config["speakerId"]
+    payload = {
+        "asr": {
+            "audio_info": {"format": "pcm", "sample_rate": 16000, "channel": 1},
+            "extra": {"end_smooth_window_ms": 800},
+        },
+        "tts": {
+            "speaker": speaker_id,
+            "audio_config": {"channel": 1, "format": "pcm_s16le", "sample_rate": 24000},
+        },
+    }
+    if speaker_id.startswith(("S_", "ICL_", "saturn_")):
+        payload["tts"]["extra"] = {"tts_2.0_model": "seed-tts-2.0"}
+        payload["dialog"] = {
+            "character_manifest": config.get("persona", "保持自然、简洁、有帮助。"),
+            "extra": {"model": "2.2.0.0", "input_mod": "audio_file"},
+        }
+    else:
+        payload["dialog"] = {
+            "bot_name": config.get("name", "数字角色")[:20],
+            "system_role": config.get("persona", "保持自然、简洁、有帮助。"),
+            "speaking_style": "使用自然、简洁、适合直接朗读的中文回答。",
+            "extra": {"model": "1.2.1.1", "input_mod": "audio_file"},
+        }
+    return payload
 
 
-def on_close(session):
-    print(f"Session ended: {session.conversation_id}")
+async def forward_upstream(upstream, browser):
+    async for data in upstream:
+        event = decode_event(data)
+        if event["message_type"] == AUDIO_ONLY_RESPONSE:
+            await browser.send(event["payload"])
+            continue
+        payload = event["payload"] if isinstance(event["payload"], dict) else {}
+        await browser.send(json.dumps({
+            "type": "event",
+            "event": event["event"],
+            "data": payload,
+        }, ensure_ascii=False))
 
 
-def on_error(error, _session):
-    _ = _session
-    print(f"Speech Engine error: {error}")
+async def handle_browser(browser):
+    session_id = str(uuid.uuid4())
+    try:
+        raw_config = await asyncio.wait_for(browser.recv(), timeout=10)
+        config = json.loads(raw_config)
+        async with websockets.connect(
+            DOUBAO_REALTIME_URL,
+            additional_headers=upstream_headers(),
+            max_size=None,
+        ) as upstream:
+            await upstream.send(encode_event(START_CONNECTION, {}))
+            first_event = decode_event(await upstream.recv())
+            if first_event["event"] != 50:
+                raise RuntimeError(first_event.get("payload") or "豆包实时连接失败")
+            await upstream.send(encode_event(START_SESSION, session_payload(config), session_id))
+            session_event = decode_event(await upstream.recv())
+            if session_event["event"] != 150:
+                raise RuntimeError(session_event.get("payload") or "豆包实时会话启动失败")
+            await browser.send(json.dumps({"type": "ready"}))
+            upstream_task = asyncio.create_task(forward_upstream(upstream, browser))
+            try:
+                async for message in browser:
+                    if isinstance(message, bytes):
+                        await upstream.send(encode_event(
+                            TASK_REQUEST, message, session_id, message_type=AUDIO_ONLY_REQUEST
+                        ))
+                    elif json.loads(message).get("type") == "finish":
+                        break
+            finally:
+                upstream_task.cancel()
+                await upstream.send(encode_event(FINISH_SESSION, {}, session_id))
+                await upstream.send(encode_event(FINISH_CONNECTION, {}))
+    except Exception as error:
+        await browser.send(json.dumps({
+            "type": "error",
+            "message": str(error),
+            "actionUrl": "https://console.volcengine.com/speech/new",
+        }, ensure_ascii=False))
 
 
 async def main():
-    engine = await elevenlabs.speech_engine.get(speech_engine_id)
-    port = int(os.getenv("SPEECH_ENGINE_PORT", "3001"))
-    print(f"Speech Engine server listening on ws://localhost:{port}/ws")
-    await engine.serve(
-        port=port,
-        path="/ws",
-        debug=True,
-        on_init=on_init,
-        on_transcript=on_transcript,
-        on_close=on_close,
-        on_error=on_error,
-    )
+    port = int(os.getenv("SPEECH_ENGINE_PORT", "3101"))
+    async with websockets.serve(handle_browser, "127.0.0.1", port, max_size=None):
+        print(f"Doubao realtime proxy listening on ws://127.0.0.1:{port}")
+        await asyncio.Future()
 
 
 if __name__ == "__main__":

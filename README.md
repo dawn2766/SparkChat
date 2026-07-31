@@ -1,31 +1,8 @@
 # SparkChat voice agent
 
-SparkChat 是一个面向手机 WebView 的数字角色对话应用，包含账号管理、角色与记忆库、流式文本聊天、语音转文字、文本朗读和 ElevenLabs 实时语音通话。
+SparkChat 是面向手机 WebView 的数字角色对话应用，包含账号与角色管理、流式文本聊天、豆包音色设计、语音识别、语音合成和端到端实时语音对话。
 
-## 前端结构
-
-前端使用原生 ES Modules，不需要额外构建步骤。各层职责如下：
-
-```text
-web/
-├── index.html              # 页面骨架和静态资源入口
-├── styles/
-│   ├── app.css             # 样式入口
-│   ├── base.css            # 设计变量、重置和基础规则
-│   ├── components.css      # 导航、表单、按钮等通用组件
-│   ├── views.css           # 认证、联系人、角色、聊天页面
-│   └── responsive.css      # 响应式与动效偏好
-└── js/
-	├── main.js             # 应用启动与页面切换
-	├── api.js              # HTTP 与流式聊天请求
-	├── state.js            # 共享运行时状态
-	├── dom.js              # DOM、转义和通知工具
-	└── views/              # 各页面控制器
-```
-
-页面模块只负责所属页面的渲染和交互；网络请求统一放在 `api.js`，共享状态统一放在 `state.js`，避免重新把样式、接口和业务逻辑写回 `index.html`。
-
-## 1. 安装依赖
+## 安装
 
 ```powershell
 py -m venv .venv
@@ -33,44 +10,46 @@ py -m venv .venv
 pip install -r requirements.txt
 ```
 
-确保 `.env` 至少包含：
+复制 `.env.example` 所需字段到 `.env`。豆包语音存在两套鉴权：
 
 ```dotenv
-ELEVENLABS_API_KEY=...
-ARK_API_KEY=...
+# 新版控制台 API Key：音色设计和 V3 TTS
+DOUBAO_SPEECH_API_KEY=
+
+# APP ID + Access Token：端到端实时语音 API
+DOUBAO_SPEECH_APP_ID=
+DOUBAO_SPEECH_ACCESS_KEY=
+
+DOUBAO_VOICE_DESIGN_SPEAKER_IDS=S_资源1,S_资源2
+DOUBAO_TTS_RESOURCE_ID=seed-tts-1.0
+DOUBAO_ICL_TTS_RESOURCE_ID=seed-icl-2.0
+DOUBAO_REALTIME_RESOURCE_ID=volc.speech.dialog
+DOUBAO_REALTIME_PUBLIC_WS=/sparkchat/realtime
+
+ARK_API_KEY=
+ARK_MODEL=doubao-seed-2-1-pro-260628
 FLASK_SECRET_KEY=请使用稳定的长随机字符串
-SPARKCHAT_VOICE_MEGADEEP=ElevenLabs中真实的voice_id
-SPARKCHAT_VOICE_IRONVOW=ElevenLabs中真实的voice_id
-SPARKCHAT_VOICE_STARLIGHT=ElevenLabs中真实的voice_id
-SPARKCHAT_VOICE_ARCHIVE=ElevenLabs中真实的voice_id
-```
 
-## 2. 创建 Speech Engine
-
-生产环境由 Nginx 将 `/sparkchat/ws` 反向代理到 Speech Engine 本地端口 `3101`，无需 ngrok。写入 `.env`：
-
-```dotenv
-SPEECH_ENGINE_WS_URL=wss://visionvoice.cn/sparkchat/ws
 SPEECH_ENGINE_PORT=3101
+CLIENT_PORT=3002
+CLIENT_HOST=127.0.0.1
+COOKIE_SECURE=false
+
+SPARKCHAT_VOICE_MEGADEEP=S_豆包音色ID
+SPARKCHAT_VOICE_IRONVOW=
+SPARKCHAT_VOICE_STARLIGHT=
+SPARKCHAT_VOICE_ARCHIVE=
 ```
 
-然后创建 Speech Engine：
+`DOUBAO_VOICE_DESIGN_SPEAKER_IDS` 是控制台购买的空白 `S_` 音色资源池。每个资源只会分配给一个用户设计音色。实时 SC2.0 只接受 `S_`、`ICL_` 或 `saturn_` 音色。
 
-```powershell
-python create_engine.py
-```
+新版 API Key 用于普通预置音色；后付费音色槽位属于旧版应用时，服务端会自动使用 APP ID + Access Token。聊天 TTS 与实时通话音色可以不同：普通 Mars/Uranus 音色用于朗读，S2S Jupiter 或设计后的 `S_` 音色用于实时通话。
 
-把打印出的 ID 写入 `.env`：
+若 API 未授权、资源未开通或额度不足，接口返回 `actionUrl`，前端会打开[豆包语音控制台](https://console.volcengine.com/speech/new)供管理员处理。
 
-```dotenv
-SPEECH_ENGINE_ID=seng_...
-```
+## 本地启动
 
-## 3. 启动
-
-配置过 `SPEECH_ENGINE_ID` 后，服务器分别启动 Speech Engine 和 Web 服务：
-
-打开两个 PowerShell 窗口，分别运行：
+打开两个终端：
 
 ```powershell
 python server.py
@@ -80,28 +59,62 @@ python server.py
 python token_server.py
 ```
 
-公网浏览器打开 <https://visionvoice.cn/sparkchat/> 并允许麦克风权限。
-
-本地默认地址由 `CLIENT_PORT` 决定，例如 `CLIENT_PORT=3002` 时访问 <http://127.0.0.1:3002/>。消息旁的朗读按钮使用 ElevenLabs，而不是浏览器系统音色；预置的“塞伯坦统帅”需要通过 `SPARKCHAT_VOICE_MEGADEEP` 绑定真实 voice ID。自定义音色在创建成功后会直接保存真实 ID，无需额外映射。
-
-`create_megatron_voice.py` 使用 ElevenLabs Voice Design API 生成原创的 Megatron 风格中文指挥官音色。该 API 要求付费计划；免费计划下应用使用已明确标注的真实预置音色作为临时降级，账号升级后重新运行脚本即可替换，不会伪造生成结果或复用具体演员的声音。
-
-预置登录账号为 `CaraLin`，密码为 `2766`。首次启动会在 `data/sparkchat.db` 创建 SQLite 数据库；账号、角色、消息和自定义音色均按用户保存。登录 Cookie 默认保存十年，生产环境必须保持 `FLASK_SECRET_KEY` 不变。
-
-## 测试
+也可以执行：
 
 ```powershell
-python -m unittest -v test_app.py
+.\start.ps1
 ```
 
-生产环境可使用：
+Web 服务默认位于 <http://127.0.0.1:3002/>，豆包实时代理监听 `127.0.0.1:3101`。浏览器需要麦克风权限。
+
+## SparkChat-Server 部署
+
+Web 服务使用 Gunicorn：
 
 ```bash
 gunicorn --workers 2 --threads 4 --bind 127.0.0.1:3002 token_server:app
 ```
 
-## 说明
+实时代理独立运行：
 
-`server.py` 使用 OpenAI 兼容接口连接豆包 Seed 2.1，模型默认读取 `ARK_MODEL`，未设置时使用 `doubao-seed-2-1-pro-260628`。ElevenLabs API key 只在服务端使用，浏览器通过 `/api/token` 获取短期 WebRTC token。
+```bash
+python server.py
+```
 
-当前实时电话由单个 Speech Engine 驱动，只对已绑定该引擎的预置角色开放。自定义角色不会再静默串用威震天的人设；要开放其电话能力，需要为该角色创建独立 Speech Engine，并在令牌接口中维护角色到引擎的映射。
+Nginx 需要同时代理 Web 和 WebSocket。实时路径必须与 `DOUBAO_REALTIME_PUBLIC_WS` 一致：
+
+```nginx
+location /sparkchat/ {
+	proxy_pass http://127.0.0.1:3002/;
+	proxy_set_header Host $host;
+	proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /sparkchat/realtime {
+	proxy_pass http://127.0.0.1:3101;
+	proxy_http_version 1.1;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_set_header Host $host;
+	proxy_read_timeout 3600s;
+}
+```
+
+生产环境应设置 `COOKIE_SECURE=true`，并保持 `FLASK_SECRET_KEY` 稳定。访问 <https://visionvoice.cn/sparkchat/> 进行真实验收。
+
+## 语音链路
+
+- 音色设计：`POST /api/voices/design` 调用豆包 `api/v3/tts/voice_design`。
+- 聊天朗读：`POST /api/characters/:id/speak` 调用豆包 V3 HTTP Chunked TTS。
+- 聊天听写：浏览器上传 16 kHz PCM，经实时代理读取 `451 ASRResponse`。
+- 实时通话：代理连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`，使用 SC2.0 `2.2.0.0`，输入 16 kHz PCM，输出 24 kHz PCM。
+
+## 验证
+
+```powershell
+python -m unittest -v test_app.py
+Get-Content web/js/doubao-realtime.js | node --input-type=module --check
+Get-Content web/js/views/chat.js | node --input-type=module --check
+```
+
+真实服务器验收需逐项检查登录、文本聊天、音色设计、朗读、听写、实时通话建连、字幕、音频播放、静音和挂断，并记录响应头 `X-Tt-Logid`。当前工作区没有 `SparkChat-Server` 的 SSH 或发布凭证时，本地测试不能替代真实豆包授权与公网链路验收。
