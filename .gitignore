@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 
 .env
+data/
 *.log
 *.pem
 server_config.txt
