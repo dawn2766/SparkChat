@@ -1,0 +1,88 @@
+@media (min-width: 581px) {
+  body {
+    padding: 22px 0;
+  }
+
+  #app {
+    min-height: calc(100vh - 44px);
+    box-shadow: var(--shadow);
+  }
+
+  .bottom-nav {
+    bottom: 22px;
+  }
+
+  .chat-view {
+    height: calc(100vh - 44px);
+  }
+}
+
+@media (max-width: 430px) {
+  .page-heading,
+  .section {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .search-box {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+
+  .contact {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .field-grid,
+  .voice-list {
+    grid-template-columns: 1fr;
+  }
+
+  .voice-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-launch {
+    width: 100%;
+  }
+
+  .field-wide {
+    grid-column: auto;
+  }
+
+  .studio-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-view {
+    padding: 22px 18px;
+  }
+
+  .auth-content h1 {
+    font-size: 36px;
+  }
+
+  .message {
+    max-width: 90%;
+  }
+
+  .app-dialog {
+    width: calc(100vw - 24px);
+  }
+
+  .dialog-body {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

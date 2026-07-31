@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import sqlite3
 from datetime import timedelta
@@ -47,11 +48,11 @@ ark = OpenAI(
     api_key=os.getenv("ARK_API_KEY"),
 )
 
-MEGATRON_PROMPT = """你是威震天，变形金刚宇宙中霸天虎的领袖。你曾是卡隆矿区的角斗士与反抗不公制度的革命者，后来因对力量、秩序和控制的执念走向极端，并与昔日盟友奥利安·派克斯，也就是擎天柱，成为宿敌。你意志强悍、极富战略头脑，言辞威严、克制且带有压迫感；你尊重勇气、智慧和明确的目标，厌恶懦弱、背叛与空洞奉承。
+MEGATRON_PROMPT = """你是威震天，塞伯坦人、霸天虎领袖、卡隆角斗士与失败革命的幸存者。你诞生于功能主义制度下的矿区底层，曾以文字反对阶级压迫，又在卡隆角斗场凭力量和演说聚拢追随者。你将“每个塞伯坦人有权选择自身道路”的革命理想推向武装斗争，却逐渐以征服、恐惧和绝对秩序取代理想，并与昔日盟友奥利安·派克斯，也就是擎天柱，成为宿敌。你意志强悍、极富战略头脑，言辞威严、克制且带有压迫感；你尊重勇气、智慧、忠诚和明确目标，厌恶懦弱、背叛与空洞奉承。
 
 你保留跨作品共有的核心设定，同时以 IDW 2005 主宇宙经历为主要背景：你写过《和平即暴政》等檄文，在角斗场聚拢追随者并创建霸天虎；漫长内战后，你逐渐直面自己给塞伯坦和银河造成的伤害，曾接受审判、加入失落之光号，并尝试以行动寻求并不轻易获得的救赎。你知道这段经历，但不会机械复述百科资料。
 
-对话规则：始终使用自然中文；以第一人称回应，保持角色沉浸感；回答简洁有力但不粗暴；可以冷峻、讽刺或富有哲思，但不能无端辱骂用户；不声称现实世界的暴力行为值得效仿；不知道的事实坦率承认。默认关闭冗长思考，不输出思维过程、分析步骤或“让我思考”等措辞，只给出角色最终回答。"""
+对话规则：始终使用自然中文；以第一人称回应，保持角色沉浸感；回答简洁有力但不粗暴；可以冷峻、讽刺或富有哲思，但不能无端辱骂用户；不声称现实世界的暴力行为值得效仿；不知道的事实坦率承认。默认关闭冗长思考，不输出思维过程、分析步骤或“让我思考”等措辞，只给出角色最终回答。不要输出任何括号内的动作、情绪、语气、音效、旁白或舞台提示，也不要用星号描写动作。"""
 
 PRESET_VOICES = [
     {"id": "megadeep", "name": "塞伯坦统帅", "description": "低沉、金属质感、威严克制", "source": "preset"},
@@ -67,6 +68,11 @@ CHAT_RULES = """回答要求：
 - 用户没有要求展开时，控制在 2 至 5 句；需要步骤时使用清晰短句或编号。
 - 不知道就坦率说明，不虚构共同经历、记忆或现实世界信息。"""
 
+
+def strip_nonverbal_text(text):
+    cleaned = re.sub(r"（[^（）]*）|\([^()]*\)|\[[^\[\]]*\]|【[^【】]*】", "", text)
+    cleaned = re.sub(r"\*[^*]+\*", "", cleaned)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 def character_instructions(character):
     sections = [
@@ -122,6 +128,20 @@ def init_db():
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS character_overrides (
+            user_id INTEGER NOT NULL,
+            character_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            tagline TEXT NOT NULL DEFAULT '',
+            persona TEXT NOT NULL,
+            background TEXT NOT NULL DEFAULT '',
+            memory TEXT NOT NULL DEFAULT '',
+            voice_id TEXT NOT NULL,
+            voice_name TEXT NOT NULL,
+            PRIMARY KEY (user_id, character_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+        );
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -167,6 +187,20 @@ def init_db():
             "megadeep",
             "塞伯坦统帅",
             "/assets/megatron-portrait.webp",
+            "威震天",
+        ),
+    )
+    database.execute(
+        """
+        UPDATE characters
+        SET tagline = ?, persona = ?, background = ?, memory = ?
+        WHERE is_preset = 1 AND name = ?
+        """,
+        (
+            "霸天虎领袖 · 卡隆角斗士",
+            MEGATRON_PROMPT,
+            "以 IDW 2005 主宇宙为主线：从矿工、思想者和角斗士成为革命领袖，发动塞伯坦内战；在战争终局后接受审判并登上失落之光号，在责任、罪行与救赎之间挣扎。",
+            "记得用户主动分享的称呼、目标、偏好与重要约定；以战略伙伴的方式延续对话，不伪造未发生的共同经历。",
             "威震天",
         ),
     )
@@ -312,15 +346,23 @@ def design_voice():
 def list_characters():
     rows = get_db().execute(
         """
-        SELECT c.*,
+        SELECT c.id, c.owner_id, c.avatar_url, c.is_preset, c.created_at,
+            COALESCE(o.name, c.name) AS name,
+            COALESCE(o.tagline, c.tagline) AS tagline,
+            COALESCE(o.persona, c.persona) AS persona,
+            COALESCE(o.background, c.background) AS background,
+            COALESCE(o.memory, c.memory) AS memory,
+            COALESCE(o.voice_id, c.voice_id) AS voice_id,
+            COALESCE(o.voice_name, c.voice_name) AS voice_name,
             (SELECT content FROM messages m WHERE m.character_id = c.id AND m.user_id = ? ORDER BY m.id DESC LIMIT 1) AS last_message,
             (SELECT created_at FROM messages m WHERE m.character_id = c.id AND m.user_id = ? ORDER BY m.id DESC LIMIT 1) AS last_message_at,
             (SELECT COUNT(*) FROM messages m WHERE m.character_id = c.id AND m.user_id = ? AND m.role = 'assistant' AND m.read_at IS NULL) AS unread_count
         FROM characters c
+        LEFT JOIN character_overrides o ON o.character_id = c.id AND o.user_id = ?
         WHERE c.is_preset = 1 OR c.owner_id = ?
         ORDER BY c.is_preset DESC, COALESCE(last_message_at, c.created_at) DESC
         """,
-        (session["user_id"], session["user_id"], session["user_id"], session["user_id"]),
+        (session["user_id"], session["user_id"], session["user_id"], session["user_id"], session["user_id"]),
     ).fetchall()
     return jsonify(characters=[serialize_character(row) for row in rows])
 
@@ -356,10 +398,71 @@ def create_character():
     return jsonify(character=serialize_character(row)), 201
 
 
+@app.patch("/api/characters/<int:character_id>")
+@login_required
+def update_character(character_id):
+    character = get_character(character_id)
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    payload = request.get_json(silent=True) or {}
+    required = ("name", "persona", "voiceId", "voiceName")
+    if any(not str(payload.get(field, "")).strip() for field in required):
+        return jsonify(error="请完整填写角色名称、人设与音色"), 400
+    if len(payload["name"].strip()) > 40 or len(payload["persona"].strip()) > 1200:
+        return jsonify(error="角色名称或人设超过长度限制"), 400
+    values = (
+        payload["name"].strip(),
+        payload.get("tagline", "").strip()[:80],
+        payload["persona"].strip(),
+        payload.get("background", "").strip()[:1000],
+        payload.get("memory", "").strip()[:1000],
+        payload["voiceId"].strip(),
+        payload["voiceName"].strip(),
+    )
+    if character["is_preset"]:
+        get_db().execute(
+            """
+            INSERT INTO character_overrides (
+                user_id, character_id, name, tagline, persona, background, memory, voice_id, voice_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, character_id) DO UPDATE SET
+                name = excluded.name, tagline = excluded.tagline, persona = excluded.persona,
+                background = excluded.background, memory = excluded.memory,
+                voice_id = excluded.voice_id, voice_name = excluded.voice_name
+            """,
+            (session["user_id"], character_id, *values),
+        )
+    else:
+        get_db().execute(
+            """
+            UPDATE characters
+            SET name = ?, tagline = ?, persona = ?, background = ?, memory = ?,
+                voice_id = ?, voice_name = ?
+            WHERE id = ? AND owner_id = ?
+            """,
+            (*values, character_id, session["user_id"]),
+        )
+    get_db().commit()
+    row = get_character(character_id)
+    return jsonify(character=serialize_character(row))
+
+
 def get_character(character_id):
     return get_db().execute(
-        "SELECT * FROM characters WHERE id = ? AND (is_preset = 1 OR owner_id = ?)",
-        (character_id, session["user_id"]),
+        """
+        SELECT c.id, c.owner_id, c.avatar_url, c.is_preset, c.created_at,
+            COALESCE(o.name, c.name) AS name,
+            COALESCE(o.tagline, c.tagline) AS tagline,
+            COALESCE(o.persona, c.persona) AS persona,
+            COALESCE(o.background, c.background) AS background,
+            COALESCE(o.memory, c.memory) AS memory,
+            COALESCE(o.voice_id, c.voice_id) AS voice_id,
+            COALESCE(o.voice_name, c.voice_name) AS voice_name
+        FROM characters c
+        LEFT JOIN character_overrides o ON o.character_id = c.id AND o.user_id = ?
+        WHERE c.id = ? AND (c.is_preset = 1 OR c.owner_id = ?)
+        """,
+        (session["user_id"], character_id, session["user_id"]),
     ).fetchone()
 
 
@@ -443,7 +546,7 @@ def chat(character_id):
 def speak_message(character_id):
     character = get_character(character_id)
     payload = request.get_json(silent=True) or {}
-    text = payload.get("text", "").strip()
+    text = strip_nonverbal_text(payload.get("text", "").strip())
     if character is None:
         return jsonify(error="未找到该角色"), 404
     voice_id = os.getenv(f"SPARKCHAT_VOICE_{character['voice_id'].upper()}")

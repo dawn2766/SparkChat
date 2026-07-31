@@ -35,6 +35,14 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(response.json["characters"][0]["name"], "威震天")
         self.assertTrue(response.json["characters"][0]["isPreset"])
 
+    def test_nonverbal_stage_directions_are_removed_from_speech(self):
+        from token_server import strip_nonverbal_text
+
+        self.assertEqual(
+            strip_nonverbal_text("（低声）准备行动。[金属碰撞声] *抬手* 现在出发。"),
+            "准备行动。 现在出发。",
+        )
+
     def test_session_cookie_survives_new_client(self):
         self.login()
         cookie = next(cookie for cookie in self.client.get_cookie("session").value.split(";") if cookie)
@@ -86,6 +94,48 @@ class SparkChatApiTest(unittest.TestCase):
         character_id = response.json["character"]["id"]
         token_response = self.client.get(f"/api/token?characterId={character_id}")
         self.assertEqual(token_response.status_code, 409)
+
+    def test_user_can_update_custom_and_override_preset_character(self):
+        self.login()
+        created = self.client.post(
+            "/api/characters",
+            json={
+                "name": "待修改角色",
+                "persona": "保持自然。",
+                "voiceId": "archive",
+                "voiceName": "方舟档案员",
+            },
+        )
+        character_id = created.json["character"]["id"]
+        response = self.client.patch(
+            f"/api/characters/{character_id}",
+            json={
+                "name": "已修改角色",
+                "tagline": "新的定位",
+                "persona": "回答简洁。",
+                "background": "新的背景。",
+                "memory": "新的记忆。",
+                "voiceId": "ironvow",
+                "voiceName": "钢铁誓言",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["character"]["name"], "已修改角色")
+        self.assertEqual(response.json["character"]["voiceId"], "ironvow")
+
+        preset_id = self.client.get("/api/characters").json["characters"][0]["id"]
+        overridden = self.client.patch(
+            f"/api/characters/{preset_id}",
+            json={"name": "修改预设", "persona": "无", "voiceId": "archive", "voiceName": "方舟档案员"},
+        )
+        self.assertEqual(overridden.status_code, 200)
+        self.assertEqual(overridden.json["character"]["name"], "修改预设")
+
+        other_client = self.app.test_client()
+        other_client.post("/api/auth/register", json={"username": "OverrideIsolation", "password": "1234"})
+        other_preset = other_client.get("/api/characters").json["characters"][0]
+        self.assertEqual(other_preset["id"], preset_id)
+        self.assertNotEqual(other_preset["name"], "修改预设")
 
 
 if __name__ == "__main__":
