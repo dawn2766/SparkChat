@@ -34,6 +34,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["characters"][0]["name"], "威震天")
         self.assertTrue(response.json["characters"][0]["isPreset"])
+        self.assertNotIn("unreadCount", response.json["characters"][0])
 
     def test_nonverbal_stage_directions_are_removed_from_speech(self):
         from token_server import strip_nonverbal_text

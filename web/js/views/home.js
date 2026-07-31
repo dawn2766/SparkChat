@@ -7,7 +7,7 @@ function formatTime(value) {
 }
 
 export function renderHome({ bindShell, openChat }) {
-  const rows = state.characters.map((character) => `<button class="contact" data-character="${character.id}">${avatar(character)}<div class="contact-main"><div class="contact-top"><span class="contact-name">${esc(character.name)}</span><span class="contact-time">${formatTime(character.lastMessageAt)}</span></div><div class="contact-preview">${esc(character.lastMessage || character.tagline || "尚未建立对话")}</div></div>${character.unreadCount ? `<span class="badge">${character.unreadCount}</span>` : ""}</button>`).join("");
+  const rows = state.characters.map((character) => `<button class="contact" data-character="${character.id}">${avatar(character)}<div class="contact-main"><div class="contact-top"><span class="contact-name">${esc(character.name)}</span><span class="contact-time">${formatTime(character.lastMessageAt)}</span></div><div class="contact-preview">${esc(character.lastMessage || character.tagline || "尚未建立对话")}</div></div></button>`).join("");
   app.innerHTML = shell(`<section class="page-heading"><div><h1>联系人</h1></div></section><label class="search-box" for="search"><span aria-hidden="true">⌕</span><input id="search" placeholder="搜索角色或最近消息" autocomplete="off"></label><div class="contact-list">${rows || '<div class="empty-state">暂无角色</div>'}</div>`, "home");
   bindShell();
   document.querySelectorAll("[data-character]").forEach((item) => {

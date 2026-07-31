@@ -228,7 +228,6 @@ def serialize_character(row):
         "isPreset": bool(row["is_preset"]),
         "lastMessage": row["last_message"] if "last_message" in row.keys() else "",
         "lastMessageAt": row["last_message_at"] if "last_message_at" in row.keys() else None,
-        "unreadCount": row["unread_count"] if "unread_count" in row.keys() else 0,
     }
 
 
@@ -352,14 +351,24 @@ def list_characters():
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
             COALESCE(o.voice_name, c.voice_name) AS voice_name,
             (SELECT content FROM messages m WHERE m.character_id = c.id AND m.user_id = ? ORDER BY m.id DESC LIMIT 1) AS last_message,
-            (SELECT created_at FROM messages m WHERE m.character_id = c.id AND m.user_id = ? ORDER BY m.id DESC LIMIT 1) AS last_message_at,
-            (SELECT COUNT(*) FROM messages m WHERE m.character_id = c.id AND m.user_id = ? AND m.role = 'assistant' AND m.read_at IS NULL) AS unread_count
+            (
+                SELECT created_at
+                FROM messages m
+                WHERE m.character_id = c.id AND m.user_id = ?
+                ORDER BY m.id DESC
+                LIMIT 1
+            ) AS last_message_at
         FROM characters c
         LEFT JOIN character_overrides o ON o.character_id = c.id AND o.user_id = ?
         WHERE c.is_preset = 1 OR c.owner_id = ?
         ORDER BY c.is_preset DESC, COALESCE(last_message_at, c.created_at) DESC
         """,
-        (session["user_id"], session["user_id"], session["user_id"], session["user_id"], session["user_id"]),
+        (
+            session["user_id"],
+            session["user_id"],
+            session["user_id"],
+            session["user_id"],
+        ),
     ).fetchall()
     return jsonify(characters=[serialize_character(row) for row in rows])
 
@@ -470,15 +479,10 @@ def get_character(character_id):
 def list_messages(character_id):
     if get_character(character_id) is None:
         return jsonify(error="未找到该角色"), 404
-    get_db().execute(
-        "UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE user_id = ? AND character_id = ? AND role = 'assistant'",
-        (session["user_id"], character_id),
-    )
     rows = get_db().execute(
         "SELECT id, role, content, created_at FROM messages WHERE user_id = ? AND character_id = ? ORDER BY id",
         (session["user_id"], character_id),
     ).fetchall()
-    get_db().commit()
     return jsonify(messages=[dict(row) for row in rows])
 
 

@@ -1,23 +1,15 @@
 @media (min-width: 581px) {
-  body {
-    padding: 22px 0;
-  }
-
   #app {
-    min-height: calc(100vh - 44px);
+    min-height: 100vh;
     box-shadow: var(--shadow);
   }
 
   .view {
-    min-height: calc(100vh - 44px);
-  }
-
-  .bottom-nav {
-    bottom: 22px;
+    min-height: 100vh;
   }
 
   .chat-view {
-    height: calc(100vh - 44px);
+    height: 100vh;
   }
 }
 
