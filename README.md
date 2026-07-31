@@ -2,6 +2,29 @@
 
 SparkChat 是一个面向手机 WebView 的数字角色对话应用，包含账号管理、角色与记忆库、流式文本聊天、语音转文字、文本朗读和 ElevenLabs 实时语音通话。
 
+## 前端结构
+
+前端使用原生 ES Modules，不需要额外构建步骤。各层职责如下：
+
+```text
+web/
+├── index.html              # 页面骨架和静态资源入口
+├── styles/
+│   ├── app.css             # 样式入口
+│   ├── base.css            # 设计变量、重置和基础规则
+│   ├── components.css      # 导航、表单、按钮等通用组件
+│   ├── views.css           # 认证、联系人、角色、聊天页面
+│   └── responsive.css      # 响应式与动效偏好
+└── js/
+	├── main.js             # 应用启动与页面切换
+	├── api.js              # HTTP 与流式聊天请求
+	├── state.js            # 共享运行时状态
+	├── dom.js              # DOM、转义和通知工具
+	└── views/              # 各页面控制器
+```
+
+页面模块只负责所属页面的渲染和交互；网络请求统一放在 `api.js`，共享状态统一放在 `state.js`，避免重新把样式、接口和业务逻辑写回 `index.html`。
+
 ## 1. 安装依赖
 
 ```powershell

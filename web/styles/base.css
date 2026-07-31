@@ -31,6 +31,25 @@ html {
   background: var(--bg);
 }
 
+html,
+body,
+#app,
+.view,
+.dialog-body,
+.messages {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#app::-webkit-scrollbar,
+.view::-webkit-scrollbar,
+.dialog-body::-webkit-scrollbar,
+.messages::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 body {
   min-height: 100vh;
   margin: 0;

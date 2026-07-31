@@ -457,6 +457,11 @@
   background: var(--surface);
 }
 
+.profile-section {
+  display: grid;
+  gap: 28px;
+}
+
 .profile-card h2 {
   margin: 0 0 5px;
   font-size: 17px;

@@ -53,7 +53,7 @@
 }
 
 .view {
-  min-height: calc(100vh - 68px);
+  min-height: 100vh;
   padding-bottom: 86px;
   animation: rise .3s ease both;
 }
@@ -234,8 +234,35 @@
 .text-area {
   min-height: 100px;
   padding: 11px 12px;
-  resize: none;
+  resize: vertical;
+  overflow-y: auto;
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   line-height: 1.55;
+}
+
+.text-area:hover,
+.text-area:focus {
+  scrollbar-color: rgb(141 152 147 / 48%) transparent;
+}
+
+.text-area::-webkit-scrollbar {
+  width: 5px;
+}
+
+.text-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.text-area::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.text-area:hover::-webkit-scrollbar-thumb,
+.text-area:focus::-webkit-scrollbar-thumb {
+  background: rgb(141 152 147 / 48%);
 }
 
 .text-input::placeholder,

@@ -8,6 +8,10 @@
     box-shadow: var(--shadow);
   }
 
+  .view {
+    min-height: calc(100vh - 44px);
+  }
+
   .bottom-nav {
     bottom: 22px;
   }

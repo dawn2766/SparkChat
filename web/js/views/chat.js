@@ -7,10 +7,8 @@ import { state } from "../state.js";
 const refreshIcons = () => createIcons({ icons: { Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } });
 
 function messageMarkup(message, character) {
-  const stamp = message.role === "user"
-    ? "You"
-    : `${esc(character.name.toUpperCase())} <button class="speak-button" data-speak="${esc(message.content)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button>`;
-  return `<div class="message ${message.role === "user" ? "user" : ""}"><div class="message-content"><div class="bubble">${esc(message.content)}</div><span class="stamp">${stamp}</span></div></div>`;
+  const stamp = message.role === "user" ? "" : `<span class="stamp">${esc(character.name.toUpperCase())} <button class="speak-button" data-speak="${esc(message.content)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
+  return `<div class="message ${message.role === "user" ? "user" : ""}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
 }
 
 function bindSpeechButtons() {
@@ -122,9 +120,8 @@ function settingsMarkup(character) {
       <header class="dialog-header"><div><h2>角色配置</h2></div></header>
       <div class="dialog-body">
         <div class="field"><label for="edit-name">角色名称</label><input class="text-input" id="edit-name" name="name" maxlength="40" required value="${esc(character.name)}"></div>
-        <div class="field"><label for="edit-persona">核心设定</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
+        <div class="field"><label for="edit-persona">身份背景</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
         <div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>
-        <input type="hidden" name="tagline" value="${esc(character.tagline)}"><input type="hidden" name="background" value="${esc(character.background)}"><input type="hidden" name="memory" value="${esc(character.memory)}">
       </div>
       <footer class="dialog-actions"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></footer>
     </form>
