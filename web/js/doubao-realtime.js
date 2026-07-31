@@ -25,6 +25,22 @@ function resample(samples, fromRate, toRate) {
   return output;
 }
 
+function assistantText(data) {
+  if (!data) return "";
+  if (typeof data === "string") return data;
+  if (Array.isArray(data)) return data.map(assistantText).filter(Boolean).join("");
+  if (typeof data !== "object") return "";
+  for (const key of ["content", "text", "delta", "answer", "response", "message"]) {
+    const value = assistantText(data[key]);
+    if (value) return value;
+  }
+  for (const key of ["data", "result", "results", "payload"]) {
+    const value = assistantText(data[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
 export async function createRealtimeSession(character, handlers = {}, options = {}) {
   const config = await api(`/api/token?characterId=${character.id}`);
   const url = config.websocketUrl.startsWith("ws")
@@ -39,8 +55,20 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let source;
   let processor;
   let closed = false;
+  let playbackTimer = 0;
+  const playbackNodes = new Set();
+
+  const reportPlaybackState = () => {
+    clearTimeout(playbackTimer);
+    handlers.onPlaybackChange?.(true);
+    const remainingMs = Math.max(0, (nextPlaybackTime - audioContext.currentTime) * 1000);
+    playbackTimer = window.setTimeout(() => {
+      if (!closed && playbackNodes.size === 0) handlers.onPlaybackChange?.(false);
+    }, remainingMs + 80);
+  };
 
   const playPcm = (arrayBuffer) => {
+    if (closed || audioContext.state === "closed") return;
     const pcm = new Int16Array(arrayBuffer);
     const buffer = audioContext.createBuffer(1, pcm.length, outputRate);
     const channel = buffer.getChannelData(0);
@@ -48,19 +76,33 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     const node = audioContext.createBufferSource();
     node.buffer = buffer;
     node.connect(audioContext.destination);
+    playbackNodes.add(node);
+    node.onended = () => {
+      playbackNodes.delete(node);
+      node.disconnect();
+      if (!closed && playbackNodes.size === 0) handlers.onPlaybackChange?.(false);
+    };
     nextPlaybackTime = Math.max(nextPlaybackTime, audioContext.currentTime);
     node.start(nextPlaybackTime);
     nextPlaybackTime += buffer.duration;
+    reportPlaybackState();
   };
 
   const stop = async () => {
     if (closed) return;
     closed = true;
+    clearTimeout(playbackTimer);
+    playbackNodes.forEach((node) => {
+      node.onended = null;
+      try { node.stop(); } catch (_error) { /* The source may already have ended. */ }
+      node.disconnect();
+    });
+    playbackNodes.clear();
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "finish" }));
     processor?.disconnect();
     source?.disconnect();
     mediaStream?.getTracks().forEach((track) => track.stop());
-    await audioContext.close();
+    if (audioContext.state !== "closed") await audioContext.close();
     socket.close();
   };
 
@@ -74,10 +116,17 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     if (message.type === "error") handlers.onError?.(message);
     if (message.type === "event") {
       const data = message.data || {};
+      if (message.event === 153 || message.event === 599) {
+        handlers.onError?.({ message: data.error || data.message || "豆包实时语音响应失败" });
+        return;
+      }
       if (message.event === 451) {
         (data.results || []).forEach((result) => handlers.onTranscript?.({ text: result.text, interim: result.is_interim }));
       }
-      if (message.event === 550) handlers.onText?.(data.content || "");
+      if (message.event !== 451) {
+        const text = assistantText(data);
+        if (text) handlers.onText?.(text);
+      }
       if (message.event === 150) handlers.onReady?.();
     }
   };
@@ -98,11 +147,22 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   const beginMicrophone = async () => {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
     source = audioContext.createMediaStreamSource(mediaStream);
-    processor = audioContext.createScriptProcessor(2048, 1, 1);
+    processor = audioContext.createScriptProcessor(1024, 1, 1);
+    let pendingSamples = new Float32Array(0);
+    const packetSamples = 320;
     processor.onaudioprocess = (event) => {
       if (socket.readyState !== WebSocket.OPEN || closed) return;
       const samples = event.inputBuffer.getChannelData(0);
-      socket.send(pcm16FromFloat32(resample(samples, audioContext.sampleRate, 16000)));
+      const converted = resample(samples, audioContext.sampleRate, 16000);
+      const combined = new Float32Array(pendingSamples.length + converted.length);
+      combined.set(pendingSamples);
+      combined.set(converted, pendingSamples.length);
+      let offset = 0;
+      while (combined.length - offset >= packetSamples) {
+        socket.send(pcm16FromFloat32(combined.subarray(offset, offset + packetSamples)));
+        offset += packetSamples;
+      }
+      pendingSamples = combined.slice(offset);
     };
     source.connect(processor);
     processor.connect(audioContext.destination);

@@ -6,6 +6,32 @@ import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
 const refreshIcons = () => createIcons({ icons: { Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } });
+let speechAudio = null;
+let speechUrl = null;
+let speechRequest = null;
+
+function stopSpeechAudio() {
+  speechRequest?.abort();
+  speechRequest = null;
+  if (speechAudio) {
+    speechAudio.pause();
+    speechAudio.removeAttribute("src");
+    speechAudio.load();
+  }
+  if (speechUrl) URL.revokeObjectURL(speechUrl);
+  speechAudio = null;
+  speechUrl = null;
+  document.querySelectorAll(".speak-button.playing").forEach((item) => item.classList.remove("playing"));
+}
+
+export async function stopVoiceInteraction() {
+  stopSpeechAudio();
+  const conversation = state.conversation;
+  state.conversation = null;
+  state.listening = false;
+  await conversation?.stop();
+  document.querySelector(".phone-overlay")?.remove();
+}
 
 function resizeComposer(textarea) {
   textarea.style.height = "auto";
@@ -32,22 +58,25 @@ function bindSpeechButtons() {
 
 async function speak(text, button = null) {
   if (!state.active || !text) return;
-  document.querySelectorAll(".speak-button.playing").forEach((item) => item.classList.remove("playing"));
+  stopSpeechAudio();
   button?.classList.add("playing");
   try {
-    const response = await fetch(apiUrl(`/api/characters/${state.active.id}/speak`), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    speechRequest = new AbortController();
+    const response = await fetch(apiUrl(`/api/characters/${state.active.id}/speak`), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }), signal: speechRequest.signal });
+    speechRequest = null;
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       if (data.actionUrl) window.open(data.actionUrl, "_blank", "noopener,noreferrer");
       throw Error(data.error || "语音生成失败");
     }
-    const audio = new Audio(URL.createObjectURL(await response.blob()));
-    audio.onended = () => button?.classList.remove("playing");
-    audio.onerror = () => { button?.classList.remove("playing"); notify("音频播放失败"); };
-    await audio.play();
+    speechUrl = URL.createObjectURL(await response.blob());
+    speechAudio = new Audio(speechUrl);
+    speechAudio.onended = stopSpeechAudio;
+    speechAudio.onerror = () => { stopSpeechAudio(); notify("音频播放失败"); };
+    await speechAudio.play();
   } catch (error) {
     button?.classList.remove("playing");
-    notify(error.message);
+    if (error.name !== "AbortError") notify(error.message);
   }
 }
 
@@ -221,6 +250,7 @@ async function startPhone() {
   let cancelled = false;
   let muted = false;
   let volumeFrame = 0;
+  let subtitleText = "";
   const close = async () => {
     if (cancelled) return;
     cancelled = true;
@@ -258,8 +288,14 @@ async function startPhone() {
   try {
     const conversation = await createRealtimeSession(state.active, {
       onReady: () => setMode("listening"),
-      onText: (text) => { if (text) subtitle.textContent = text.slice(0, 160); },
+      onText: (text) => {
+        if (!text) return;
+        if (!subtitleText || text.startsWith(subtitleText)) subtitleText = text;
+        else if (!subtitleText.endsWith(text)) subtitleText += text;
+        subtitle.textContent = subtitleText.slice(-160);
+      },
       onTranscript: () => setMode("listening"),
+      onPlaybackChange: (playing) => setMode(playing ? "speaking" : "listening"),
       onError: (error) => { subtitle.textContent = error?.message || "语音连接发生错误"; },
     });
     if (cancelled) {
@@ -289,7 +325,10 @@ export function renderChat({ onBack }) {
   const character = state.active;
   const messages = state.messages.map((message) => messageMarkup(message, character)).join("");
   app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人">‹</button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></header><div class="messages" id="messages">${messages || `<div class="empty-state">还没有消息</div>`}</div><form class="composer" id="composer"><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" placeholder="输入消息…" required></textarea><button class="composer-button send" aria-label="发送">↑</button></form></section>${settingsMarkup(character)}`;
-  document.querySelector("#back").onclick = onBack;
+  document.querySelector("#back").onclick = async () => {
+    await stopVoiceInteraction();
+    onBack();
+  };
   document.querySelector("#call").onclick = startPhone;
   document.querySelector("#composer").onsubmit = sendMessage;
   const composer = document.querySelector("#composer textarea");

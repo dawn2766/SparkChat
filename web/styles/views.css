@@ -837,14 +837,22 @@
 .phone-overlay h1 {
   margin: 23px 0 6px;
   font-size: 27px;
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 
 .phone-status {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  min-height: 22px;
   color: var(--accent);
-  font: 9px var(--font-mono);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0;
 }
 
 .status-signal {
@@ -888,9 +896,12 @@
 .phone-subtitle {
   min-height: 60px;
   max-width: 330px;
+  margin-top: 10px;
   color: #dce2de;
   font-size: 14px;
   line-height: 1.65;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .call-mode {

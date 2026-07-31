@@ -52,30 +52,41 @@ def session_payload(config):
     if speaker_id.startswith(("S_", "ICL_", "saturn_")):
         payload["tts"]["extra"] = {"tts_2.0_model": "seed-tts-2.0"}
         payload["dialog"] = {
-            "character_manifest": config.get("persona", "保持自然、简洁、有帮助。"),
-            "extra": {"model": "2.2.0.0", "input_mod": "audio_file"},
+            "character_manifest": (
+                config.get("persona", "保持自然、简洁、有帮助。")
+                + "\n\n表达方式：使用原创的低沉、冷峻、克制的机械统帅声线。语速偏慢，咬字硬朗，句尾坚定下沉，带自然的金属生命体重量感；不要尖叫、不要卡通化、不要夸张咆哮，始终保持中文清晰可懂。"
+            ),
+            "extra": {"model": "2.2.0.0", "input_mod": "keep_alive"},
         }
     else:
         payload["dialog"] = {
             "bot_name": config.get("name", "数字角色")[:20],
             "system_role": config.get("persona", "保持自然、简洁、有帮助。"),
             "speaking_style": "使用自然、简洁、适合直接朗读的中文回答。",
-            "extra": {"model": "1.2.1.1", "input_mod": "audio_file"},
+            "extra": {"model": "1.2.1.1", "input_mod": "keep_alive"},
         }
     return payload
 
 
 async def forward_upstream(upstream, browser):
-    async for data in upstream:
-        event = decode_event(data)
-        if event["message_type"] == AUDIO_ONLY_RESPONSE:
-            await browser.send(event["payload"])
-            continue
-        payload = event["payload"] if isinstance(event["payload"], dict) else {}
+    try:
+        async for data in upstream:
+            event = decode_event(data)
+            if event["message_type"] == AUDIO_ONLY_RESPONSE:
+                await browser.send(event["payload"])
+                continue
+            payload = event["payload"] if isinstance(event["payload"], dict) else {}
+            await browser.send(json.dumps({
+                "type": "event",
+                "event": event["event"],
+                "data": payload,
+            }, ensure_ascii=False))
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
         await browser.send(json.dumps({
-            "type": "event",
-            "event": event["event"],
-            "data": payload,
+            "type": "error",
+            "message": f"豆包实时语音上游连接异常：{error}",
         }, ensure_ascii=False))
 
 

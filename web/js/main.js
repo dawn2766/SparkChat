@@ -3,7 +3,7 @@ import { app } from "./dom.js";
 import { state } from "./state.js";
 import { renderAuth } from "./views/auth.js";
 import { renderCreate } from "./views/create.js";
-import { openChat } from "./views/chat.js";
+import { openChat, stopVoiceInteraction } from "./views/chat.js";
 import { renderHome } from "./views/home.js";
 import { renderProfile } from "./views/profile.js";
 
@@ -21,6 +21,7 @@ async function openCharacter(id) {
 function bindShell() {
   document.querySelectorAll("[data-tab]").forEach((tab) => {
     tab.onclick = () => {
+      stopVoiceInteraction();
       if (tab.dataset.tab === "home") renderHome({ bindShell, openChat: openCharacter });
       if (tab.dataset.tab === "create") renderCreate({ bindShell, onCreated: loadHome });
       if (tab.dataset.tab === "profile") renderProfile({ bindShell, onLogout: () => renderAuth("", loadHome) });

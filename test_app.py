@@ -44,6 +44,27 @@ class SparkChatApiTest(unittest.TestCase):
             "准备行动。 现在出发。",
         )
 
+    def test_designed_voice_uses_expressive_tts_2_model(self):
+        import base64
+        import json
+        from doubao_speech import DoubaoSpeechClient
+
+        captured = {}
+        client = DoubaoSpeechClient(api_key="test-key")
+
+        def fake_post(_url, payload, **_kwargs):
+            captured.update(payload)
+            event = {"code": 0, "data": base64.b64encode(b"audio").decode("ascii")}
+            return f"data: {json.dumps(event)}\n".encode("utf-8"), {}
+
+        client._post = fake_post
+        audio, content_type = client.synthesize("S_test_voice", "测试")
+
+        self.assertEqual(audio, b"audio")
+        self.assertEqual(content_type, "audio/mpeg")
+        self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-expressive")
+        self.assertEqual(captured["req_params"]["audio_params"]["speech_rate"], -8)
+
     def test_speech_quota_error_returns_service_unavailable(self):
         import token_server
         from doubao_speech import DoubaoSpeechError

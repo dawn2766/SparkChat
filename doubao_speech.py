@@ -109,10 +109,15 @@ class DoubaoSpeechClient:
                 "req_params": {
                     "text": text,
                     "speaker": speaker_id,
+                    **(
+                        {"model": "seed-tts-2.0-expressive"}
+                        if speaker_id.startswith(("S_", "ICL_", "saturn_"))
+                        else {}
+                    ),
                     "audio_params": {
                         "format": "mp3",
                         "sample_rate": 24000,
-                        "speech_rate": 0,
+                        "speech_rate": -8 if speaker_id.startswith(("S_", "ICL_", "saturn_")) else 0,
                     },
                 },
             },
