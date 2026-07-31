@@ -71,6 +71,22 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(self.client.post("/api/auth/logout").status_code, 200)
         self.assertEqual(self.client.get("/api/characters").status_code, 401)
 
+    def test_custom_character_cannot_use_preset_call_engine(self):
+        self.login()
+        response = self.client.post(
+            "/api/characters",
+            json={
+                "name": "电话隔离测试",
+                "persona": "保持自然。",
+                "voiceId": "archive",
+                "voiceName": "方舟档案员",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        character_id = response.json["character"]["id"]
+        token_response = self.client.get(f"/api/token?characterId={character_id}")
+        self.assertEqual(token_response.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

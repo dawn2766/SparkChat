@@ -60,6 +60,26 @@ PRESET_VOICES = [
     {"id": "archive", "name": "方舟档案员", "description": "沉稳、中性、知识感", "source": "preset"},
 ]
 
+CHAT_RULES = """回答要求：
+- 始终使用自然、准确、简洁的中文，不输出思维过程、分析草稿或模板化客套话。
+- 先直接回应用户当前问题，再在确有帮助时补充一到两点背景；不要重复用户已经说过的内容。
+- 保持角色的价值观、语气和知识边界，但不要为了扮演角色而牺牲可理解性，也不要无端辱骂用户。
+- 用户没有要求展开时，控制在 2 至 5 句；需要步骤时使用清晰短句或编号。
+- 不知道就坦率说明，不虚构共同经历、记忆或现实世界信息。"""
+
+
+def character_instructions(character):
+    sections = [
+        f"你正在与用户进行持续对话。你的角色名称是：{character['name']}。",
+        "角色核心设定：" + (character["persona"] or "保持真诚、自然、有帮助。"),
+    ]
+    if character["background"]:
+        sections.append("角色背景：" + character["background"])
+    if character["memory"]:
+        sections.append("仅将以下内容视为用户明确提供的长期记忆，不要自行扩写：" + character["memory"])
+    sections.append(CHAT_RULES)
+    return "\n\n".join(sections)
+
 
 def get_db():
     if "db" not in g:
@@ -298,7 +318,7 @@ def list_characters():
             (SELECT COUNT(*) FROM messages m WHERE m.character_id = c.id AND m.user_id = ? AND m.role = 'assistant' AND m.read_at IS NULL) AS unread_count
         FROM characters c
         WHERE c.is_preset = 1 OR c.owner_id = ?
-        ORDER BY COALESCE(last_message_at, c.created_at) DESC
+        ORDER BY c.is_preset DESC, COALESCE(last_message_at, c.created_at) DESC
         """,
         (session["user_id"], session["user_id"], session["user_id"], session["user_id"]),
     ).fetchall()
@@ -382,9 +402,7 @@ def chat(character_id):
     ).fetchall()[::-1]
     database.commit()
 
-    instructions = "\n\n".join(
-        part for part in (character["persona"], character["background"], character["memory"]) if part
-    )
+    instructions = character_instructions(character)
 
     @stream_with_context
     def generate():
@@ -413,12 +431,53 @@ def chat(character_id):
             app.logger.exception("Chat stream failed")
             yield f"data: {json.dumps({'type': 'error', 'message': str(error)}, ensure_ascii=False)}\n\n"
 
-    return Response(generate(), mimetype="text/event-stream", headers={"X-Accel-Buffering": "no"})
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@app.post("/api/characters/<int:character_id>/speak")
+@login_required
+def speak_message(character_id):
+    character = get_character(character_id)
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text", "").strip()
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    voice_id = os.getenv(f"SPARKCHAT_VOICE_{character['voice_id'].upper()}")
+    if not voice_id and character["voice_id"] not in {voice["id"] for voice in PRESET_VOICES}:
+        voice_id = character["voice_id"]
+    if not text or len(text) > 5000:
+        return jsonify(error="朗读内容需为 1 至 5000 个字符"), 400
+    if elevenlabs is None or not os.getenv("ELEVENLABS_API_KEY"):
+        return jsonify(error="服务器尚未配置 ElevenLabs TTS"), 503
+    if not voice_id:
+        return jsonify(error="该角色尚未绑定真实音色，请先在服务器配置 voice ID"), 503
+    try:
+        audio = elevenlabs.text_to_speech.convert(
+            voice_id=voice_id,
+            text=text,
+            model_id=os.getenv("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
+            output_format="mp3_44100_128",
+            language_code="zh",
+        )
+        return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
+    except Exception as error:
+        app.logger.exception("TTS failed")
+        return jsonify(error=f"语音生成失败：{error}"), 502
 
 
 @app.get("/api/token")
 @login_required
 def get_token():
+    character_id = request.args.get("characterId", type=int)
+    character = get_character(character_id) if character_id else None
+    if character is None:
+        return jsonify(error="未找到通话角色"), 404
+    if not character["is_preset"]:
+        return jsonify(error="该自定义角色尚未绑定独立实时语音引擎"), 409
     speech_engine_id = os.getenv("SPEECH_ENGINE_ID")
     if elevenlabs is None or not speech_engine_id:
         return jsonify(error="ElevenLabs 或 SPEECH_ENGINE_ID 尚未配置"), 503
