@@ -54,7 +54,7 @@ def session_payload(config):
         payload["dialog"] = {
             "character_manifest": (
                 config.get("persona", "保持自然、简洁、有帮助。")
-                + "\n\n表达方式：使用原创的低沉、冷峻、克制的机械统帅声线。语速偏慢，咬字硬朗，句尾坚定下沉，带自然的金属生命体重量感；不要尖叫、不要卡通化、不要夸张咆哮，始终保持中文清晰可懂。"
+                + "\n\nDelivery: use an original, low, cold, controlled mechanical commander voice. Speak slowly with hard consonants, firm falling sentence endings, restrained menace, and the weight of a metal lifeform. Avoid shouting, cartoon effects, melodrama, and warmth. Keep English pronunciation clear and natural."
             ),
             "extra": {"model": "2.2.0.0", "input_mod": "keep_alive"},
         }
