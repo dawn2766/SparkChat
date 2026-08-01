@@ -275,13 +275,15 @@ class SparkChatApiTest(unittest.TestCase):
         original_client = token_server.doubao_speech
         original_app_id = os.environ.get("DOUBAO_SPEECH_APP_ID")
         original_access_key = os.environ.get("DOUBAO_SPEECH_ACCESS_KEY")
+        original_realtime_voice = os.environ.get("SPARKCHAT_REALTIME_VOICE_S_TEST_CUSTOM")
         try:
             token_server.doubao_speech = type("ConfiguredSpeech", (), {"configured": True})()
             os.environ["DOUBAO_SPEECH_APP_ID"] = "test-app-id"
             os.environ["DOUBAO_SPEECH_ACCESS_KEY"] = "test-access-key"
+            os.environ["SPARKCHAT_REALTIME_VOICE_S_TEST_CUSTOM"] = "zh_male_xiaotian_jupiter_bigtts"
             token_response = self.client.get(f"/api/token?characterId={character_id}")
             self.assertEqual(token_response.status_code, 200)
-            self.assertEqual(token_response.json["speakerId"], "S_test_custom")
+            self.assertEqual(token_response.json["speakerId"], "zh_male_xiaotian_jupiter_bigtts")
             self.assertEqual(token_response.json["characterId"], character_id)
         finally:
             token_server.doubao_speech = original_client
@@ -293,6 +295,10 @@ class SparkChatApiTest(unittest.TestCase):
                 os.environ.pop("DOUBAO_SPEECH_ACCESS_KEY", None)
             else:
                 os.environ["DOUBAO_SPEECH_ACCESS_KEY"] = original_access_key
+            if original_realtime_voice is None:
+                os.environ.pop("SPARKCHAT_REALTIME_VOICE_S_TEST_CUSTOM", None)
+            else:
+                os.environ["SPARKCHAT_REALTIME_VOICE_S_TEST_CUSTOM"] = original_realtime_voice
 
     def test_https_token_never_returns_insecure_local_websocket_url(self):
         import token_server
@@ -327,7 +333,7 @@ class SparkChatApiTest(unittest.TestCase):
                 else:
                     os.environ[name] = value
 
-    def test_cloned_voice_realtime_session_uses_expressive_model(self):
+    def test_cloned_voice_realtime_session_uses_sc2_model(self):
         from server import session_payload
 
         payload = session_payload({
@@ -339,7 +345,53 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(payload["tts"]["speaker"], "S_test_voice")
         self.assertEqual(payload["tts"]["extra"]["explicit_language"], "en")
-        self.assertEqual(payload["tts"]["extra"]["tts_2.0_model"], "expressive")
+        self.assertEqual(payload["dialog"]["extra"]["model"], "2.2.0.0")
+
+    def test_realtime_icl_v3_voice_uses_o2_session_payload(self):
+        from server import session_payload
+
+        payload = session_payload({
+            "speakerId": "ICL_uranus_6a6d9cd9d9b89695",
+            "language": "en",
+            "instructions": "Use English.",
+            "speakingStyle": "Speak as a controlled commander.",
+        })
+
+        self.assertEqual(payload["tts"]["speaker"], "ICL_uranus_6a6d9cd9d9b89695")
+        self.assertEqual(payload["dialog"]["extra"]["model"], "2.1.0.0")
+        self.assertEqual(payload["dialog"]["system_role"], "Use English.")
+
+    def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
+        from server import session_payload
+        from token_server import build_agent_instructions, realtime_character_config
+
+        character = {
+            "name": "Megatron",
+            "persona": "Identity",
+            "voice_id": "megadeep",
+        }
+        config = realtime_character_config(character, "S_test_voice")
+        payload = session_payload({"speakerId": "S_test_voice", **config})
+
+        self.assertEqual(config["instructions"], build_agent_instructions(character))
+        self.assertEqual(config["language"], "en")
+        self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
+        self.assertIn("mechanical commander", payload["dialog"]["character_manifest"])
+
+    def test_custom_cloned_voice_does_not_get_megatron_delivery(self):
+        from server import session_payload
+        from token_server import realtime_character_config
+
+        character = {
+            "name": "Custom",
+            "persona": "保持温和。",
+            "voice_id": "S_custom",
+        }
+        config = realtime_character_config(character, "S_custom")
+        payload = session_payload({"speakerId": "S_custom", **config})
+
+        self.assertNotIn("mechanical commander", payload["dialog"]["character_manifest"])
+        self.assertIn("始终使用自然、准确、简洁的中文", config["instructions"])
 
     def test_realtime_voice_mapping_is_independent_from_cloned_tts_voice(self):
         import token_server

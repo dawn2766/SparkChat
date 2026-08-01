@@ -26,13 +26,11 @@ logger = logging.getLogger("sparkchat.realtime")
 
 
 def upstream_headers():
-    app_id = os.getenv("DOUBAO_SPEECH_APP_ID")
-    access_key = os.getenv("DOUBAO_SPEECH_ACCESS_KEY")
-    if not app_id or not access_key:
-        raise RuntimeError("DOUBAO_SPEECH_APP_ID 或 DOUBAO_SPEECH_ACCESS_KEY 尚未配置")
+    api_key = os.getenv("DOUBAO_SPEECH_API_KEY")
+    if not api_key:
+        raise RuntimeError("豆包实时语音 API Key 尚未配置")
     return {
-        "X-Api-App-ID": app_id,
-        "X-Api-Access-Key": access_key,
+        "X-Api-Key": api_key,
         "X-Api-Resource-Id": os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
         "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
         "X-Api-Connect-Id": str(uuid.uuid4()),
@@ -42,6 +40,10 @@ def upstream_headers():
 def session_payload(config):
     speaker_id = config["speakerId"]
     language = config.get("language", "")
+    instructions = config.get("instructions") or config.get("persona", "保持自然、简洁、有帮助。")
+    speaking_style = config.get("speakingStyle", "Speak naturally and clearly.")
+    is_o2_clone = speaker_id.startswith("ICL_uranus_")
+    is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_")) and not is_o2_clone
     payload = {
         "asr": {
             "audio_info": {"format": "pcm", "sample_rate": 16000, "channel": 1},
@@ -52,24 +54,19 @@ def session_payload(config):
             "audio_config": {"channel": 1, "format": "pcm_s16le", "sample_rate": 24000},
         },
     }
-    if speaker_id.startswith(("S_", "ICL_", "saturn_")):
-        if language:
-            payload["tts"]["extra"] = {"explicit_language": language, "tts_2.0_model": "expressive"}
-        else:
-            payload["tts"]["extra"] = {"tts_2.0_model": "expressive"}
+    if language:
+        payload["tts"]["extra"] = {"explicit_language": language}
+    if is_sc2_voice:
         payload["dialog"] = {
-            "character_manifest": (
-                config.get("persona", "保持自然、简洁、有帮助。")
-                + "\n\nDelivery: use an original, low, cold, controlled mechanical commander voice. Speak slowly with hard consonants, firm falling sentence endings, restrained menace, and the weight of a metal lifeform. Avoid shouting, cartoon effects, melodrama, and warmth. Keep English pronunciation clear and natural."
-            ),
+            "character_manifest": f"{instructions}\n\nDelivery: {speaking_style}",
             "extra": {"model": "2.2.0.0", "input_mod": "keep_alive"},
         }
     else:
         payload["dialog"] = {
             "bot_name": config.get("name", "数字角色")[:20],
-            "system_role": config.get("persona", "保持自然、简洁、有帮助。"),
-            "speaking_style": "使用自然、简洁、适合直接朗读的中文回答。",
-            "extra": {"model": "1.2.1.1", "input_mod": "keep_alive"},
+            "system_role": instructions,
+            "speaking_style": speaking_style,
+            "extra": {"model": "2.1.0.0" if is_o2_clone else "1.2.1.1", "input_mod": "keep_alive"},
         }
     return payload
 

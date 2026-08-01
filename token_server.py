@@ -147,6 +147,22 @@ def build_agent_instructions(character):
     return f"{character_instructions(character)}\n\n{system_prompt}"
 
 
+def realtime_character_config(character, speaker_id):
+    is_megatron = character["voice_id"] == "megadeep"
+    is_cloned_voice = speaker_id.startswith(("S_", "ICL_", "saturn_"))
+    configured_language = os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if is_cloned_voice else ""
+    return {
+        "instructions": build_agent_instructions(character),
+        "language": "en" if is_megatron else configured_language,
+        "speakingStyle": (
+            "Use an original, low, cold, controlled mechanical commander voice. "
+            "Speak measured English with firm falling endings; avoid shouting, melodrama, and warmth."
+            if is_megatron
+            else "Speak naturally and clearly while preserving the character's own tone."
+        ),
+    }
+
+
 def get_db():
     if "db" not in g:
         DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -664,9 +680,9 @@ def get_token():
     character = get_character(character_id) if character_id else None
     if character is None:
         return jsonify(error="未找到通话角色"), 404
-    if not os.getenv("DOUBAO_SPEECH_APP_ID") or not os.getenv("DOUBAO_SPEECH_ACCESS_KEY"):
+    if not os.getenv("DOUBAO_SPEECH_API_KEY"):
         return jsonify(
-            error="豆包端到端实时语音需要配置 APP ID 和 Access Token",
+            error="豆包端到端实时语音需要配置 API Key",
             actionUrl=SPEECH_CONSOLE_URL,
         ), 503
     speaker_id = doubao_realtime_speaker_id(character)
@@ -675,11 +691,14 @@ def get_token():
             error="该角色尚未绑定豆包音色，请先完成音色设计或配置",
             actionUrl=SPEECH_CONSOLE_URL,
         ), 503
+    realtime_config = realtime_character_config(character, speaker_id)
     return jsonify(
         websocketUrl=realtime_websocket_url(),
         resourceId=os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
         speakerId=speaker_id,
-        language=os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if speaker_id.startswith(("S_", "ICL_", "saturn_")) else "",
+        language=realtime_config["language"],
+        instructions=realtime_config["instructions"],
+        speakingStyle=realtime_config["speakingStyle"],
         characterId=character["id"],
     )
 

@@ -1,4 +1,5 @@
 import { api, apiUrl } from "./api.js";
+import { mergeRealtimeText } from "./realtime-text.js";
 
 function pcm16FromFloat32(samples) {
   const pcm = new ArrayBuffer(samples.length * 2);
@@ -56,6 +57,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let processor;
   let closed = false;
   let playbackTimer = 0;
+  let assistantTurnText = "";
   const playbackNodes = new Set();
 
   const reportPlaybackState = () => {
@@ -121,11 +123,20 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         return;
       }
       if (message.event === 451) {
-        (data.results || []).forEach((result) => handlers.onTranscript?.({ text: result.text, interim: result.is_interim }));
+        (data.results || []).forEach((result) => {
+          if (!result.is_interim && result.text) assistantTurnText = "";
+          handlers.onTranscript?.({ text: result.text, interim: result.is_interim });
+        });
       }
       if (message.event !== 451) {
         const text = assistantText(data);
-        if (text) handlers.onText?.(text);
+        if (text) {
+          const mergedText = mergeRealtimeText(assistantTurnText, text);
+          if (mergedText !== assistantTurnText) {
+            assistantTurnText = mergedText;
+            handlers.onText?.(assistantTurnText);
+          }
+        }
       }
       if (message.event === 150) handlers.onReady?.();
     }
@@ -137,7 +148,9 @@ export async function createRealtimeSession(character, handlers = {}, options = 
       socket.send(JSON.stringify({
         speakerId: config.speakerId,
         name: character.name,
-        persona: character.persona,
+        language: config.language,
+        instructions: config.instructions,
+        speakingStyle: config.speakingStyle,
       }));
       resolve();
     };

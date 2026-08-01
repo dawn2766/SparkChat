@@ -272,7 +272,6 @@ async function startPhone() {
   let cancelled = false;
   let muted = false;
   let volumeFrame = 0;
-  let subtitleText = "";
   const close = async () => {
     if (cancelled) return;
     cancelled = true;
@@ -312,11 +311,12 @@ async function startPhone() {
       onReady: () => setMode("listening"),
       onText: (text) => {
         if (!text) return;
-        if (!subtitleText || text.startsWith(subtitleText)) subtitleText = text;
-        else if (!subtitleText.endsWith(text)) subtitleText += text;
-        subtitle.textContent = subtitleText.slice(-160);
+        subtitle.textContent = text.slice(-160);
       },
-      onTranscript: () => setMode("listening"),
+      onTranscript: (data) => {
+        if (!data.interim && data.text) subtitle.textContent = "";
+        setMode("listening");
+      },
       onPlaybackChange: (playing) => setMode(playing ? "speaking" : "listening"),
       onError: (error) => { subtitle.textContent = error?.message || "语音连接发生错误"; },
     });

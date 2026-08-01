@@ -16,10 +16,6 @@ pip install -r requirements.txt
 # 新版控制台 API Key：音色设计和 V3 语音合成
 DOUBAO_SPEECH_API_KEY=
 
-# APP ID + Access Token：仅用于端到端实时语音 API
-DOUBAO_SPEECH_APP_ID=
-DOUBAO_SPEECH_ACCESS_KEY=
-
 DOUBAO_VOICE_DESIGN_SPEAKER_IDS=S_资源1,S_资源2
 DOUBAO_ICL_LANGUAGE=en
 DOUBAO_REALTIME_RESOURCE_ID=volc.speech.dialog
@@ -40,10 +36,9 @@ SPARKCHAT_VOICE_STARLIGHT=
 SPARKCHAT_VOICE_ARCHIVE=
 ```
 
-`DOUBAO_VOICE_DESIGN_SPEAKER_IDS` 是控制台购买的空白 `S_` 音色资源池。每个资源只会分配给一个用户设计音色。实时 SC2.0 只接受 `S_`、`ICL_` 或 `saturn_` 音色。
+`DOUBAO_VOICE_DESIGN_SPEAKER_IDS` 是控制台购买的空白 `S_` 音色资源池。每个资源只会分配给一个用户设计音色。声音复刻 V3 状态接口会为 ICL V3 音色返回 `ICL_uranus_...` 实时映射 ID；该 ID 使用 O2.0，`saturn_` 和 SC2.0 实时克隆音色使用 SC2.0。
 
-聊天朗读统一使用新版 API Key 和 V3 HTTP SSE 接口。Mars/Moon 等预置 1.0 音色使用 `seed-tts-1.0`，Uranus 预置 2.0 音色使用 `seed-tts-2.0`，`S_`、`ICL_`、`saturn_` 复刻音色使用最新的 `seed-icl-2.0` 与 `seed-tts-2.0-standard`；这些值由代码按音色类型选择，不能通过环境变量混配。APP ID + Access Token 仅供端到端实时语音代理使用。聊天朗读与实时通话可分别通过 `SPARKCHAT_VOICE_*` 和 `SPARKCHAT_REALTIME_VOICE_*` 绑定音色。
-聊天朗读统一使用新版 API Key 和 V3 HTTP SSE 接口。Mars/Moon 等预置 1.0 音色使用 `seed-tts-1.0`，Uranus 预置 2.0 音色使用 `seed-tts-2.0`，`S_`、`ICL_`、`saturn_` 复刻音色使用最新的 `seed-icl-2.0` 与 `seed-tts-2.0-standard`；这些值由代码按音色类型选择，不能通过环境变量混配。APP ID + Access Token 仅供端到端实时语音代理使用。聊天朗读与实时通话必须分别通过 `SPARKCHAT_VOICE_*` 和 `SPARKCHAT_REALTIME_VOICE_*` 绑定音色。声音复刻 HTTP 音色不能直接用于端到端实时对话；实时对话应使用官方 Jupiter/Uranus 音色或文档列出的 `ICL_`/`saturn_` 实时克隆音色。
+聊天朗读和端到端实时语音统一使用新版 API Key。Mars/Moon 等预置 1.0 音色使用 `seed-tts-1.0`，Uranus 预置 2.0 音色使用 `seed-tts-2.0`，声音复刻 2.0 使用 `seed-icl-2.0`；实时 WebSocket 资源 ID 固定为 `volc.speech.dialog`。`SPARKCHAT_VOICE_*` 和 `SPARKCHAT_REALTIME_VOICE_*` 可绑定同一个声音复刻 2.0 `S_` 音色 ID。
 
 若 API 未授权、资源未开通或额度不足，接口返回 `actionUrl`，前端会打开[豆包语音控制台](https://console.volcengine.com/speech/new)供管理员处理。
 
@@ -107,7 +102,7 @@ location /sparkchat/realtime {
 - 音色设计：`POST /api/voices/design` 调用豆包 `api/v3/tts/voice_design`。
 - 聊天朗读：`POST /api/characters/:id/speak` 调用豆包 V3 HTTP Chunked TTS。
 - 聊天听写：浏览器上传 16 kHz PCM，经实时代理读取 `451 ASRResponse`。
-- 实时通话：代理连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`，使用 SC2.0 `2.2.0.0`，输入 16 kHz PCM，输出 24 kHz PCM。
+- 实时通话：代理连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`；`ICL_uranus_...` ICL V3 音色使用 O2.0 `2.1.0.0`，SC2.0 音色使用 `2.2.0.0`，输入 16 kHz PCM，输出 24 kHz PCM。
 
 ## 验证
 
