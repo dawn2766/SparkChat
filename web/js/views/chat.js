@@ -1,14 +1,15 @@
-import { createIcons, Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { createIcons, Mic, MicOff, Pause, Phone, PhoneOff, Play, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
-const refreshIcons = () => createIcons({ icons: { Mic, MicOff, Phone, PhoneOff, Settings2, Volume2 } });
+const refreshIcons = () => createIcons({ icons: { Mic, MicOff, Pause, Phone, PhoneOff, Play, Settings2, Volume2 } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
+let speechButton = null;
 
 function stopSpeechAudio() {
   speechRequest?.abort();
@@ -19,9 +20,20 @@ function stopSpeechAudio() {
     speechAudio.load();
   }
   if (speechUrl) URL.revokeObjectURL(speechUrl);
+  const previousButton = speechButton;
   speechAudio = null;
   speechUrl = null;
+  speechButton = null;
+  updateSpeechButton(previousButton, false);
   document.querySelectorAll(".speak-button.playing").forEach((item) => item.classList.remove("playing"));
+}
+
+function updateSpeechButton(button, playing) {
+  if (!button) return;
+  button.classList.toggle("playing", playing);
+  button.setAttribute("aria-label", playing ? "暂停朗读" : "继续朗读");
+  button.innerHTML = `<i data-lucide="${playing ? "pause" : "play"}"></i>`;
+  refreshIcons();
 }
 
 export async function stopVoiceInteraction() {
@@ -58,8 +70,19 @@ function bindSpeechButtons() {
 
 async function speak(text, button = null) {
   if (!state.active || !text) return;
+  if (speechAudio && speechButton === button) {
+    if (speechAudio.paused) {
+      await speechAudio.play();
+      updateSpeechButton(button, true);
+    } else {
+      speechAudio.pause();
+      updateSpeechButton(button, false);
+    }
+    return;
+  }
   stopSpeechAudio();
-  button?.classList.add("playing");
+  speechButton = button;
+  updateSpeechButton(button, true);
   try {
     speechRequest = new AbortController();
     const response = await fetch(apiUrl(`/api/characters/${state.active.id}/speak`), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }), signal: speechRequest.signal });
@@ -75,7 +98,7 @@ async function speak(text, button = null) {
     speechAudio.onerror = () => { stopSpeechAudio(); notify("音频播放失败"); };
     await speechAudio.play();
   } catch (error) {
-    button?.classList.remove("playing");
+    if (speechButton === button) stopSpeechAudio();
     if (error.name !== "AbortError") notify(error.message);
   }
 }

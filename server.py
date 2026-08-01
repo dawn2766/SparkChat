@@ -39,6 +39,7 @@ def upstream_headers():
 
 def session_payload(config):
     speaker_id = config["speakerId"]
+    language = config.get("language", "")
     payload = {
         "asr": {
             "audio_info": {"format": "pcm", "sample_rate": 16000, "channel": 1},
@@ -50,7 +51,10 @@ def session_payload(config):
         },
     }
     if speaker_id.startswith(("S_", "ICL_", "saturn_")):
-        payload["tts"]["extra"] = {"tts_2.0_model": "seed-tts-2.0"}
+        if language:
+            payload["tts"]["extra"] = {"explicit_language": language, "tts_2.0_model": "seed-tts-2.0"}
+        else:
+            payload["tts"]["extra"] = {"tts_2.0_model": "seed-tts-2.0"}
         payload["dialog"] = {
             "character_manifest": (
                 config.get("persona", "保持自然、简洁、有帮助。")

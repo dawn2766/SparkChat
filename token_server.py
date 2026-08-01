@@ -672,6 +672,7 @@ def get_token():
         websocketUrl=os.getenv("DOUBAO_REALTIME_PUBLIC_WS", "/sparkchat/realtime"),
         resourceId=os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
         speakerId=speaker_id,
+        language=os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if speaker_id.startswith(("S_", "ICL_", "saturn_")) else "",
         characterId=character["id"],
     )
 

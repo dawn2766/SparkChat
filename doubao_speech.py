@@ -96,6 +96,7 @@ class DoubaoSpeechClient:
         return result
 
     def synthesize(self, speaker_id, text):
+        language = os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if speaker_id.startswith(("S_", "ICL_", "saturn_")) else ""
         resource_id = (
             os.getenv("DOUBAO_ICL_TTS_RESOURCE_ID", "seed-icl-2.0")
             if speaker_id.startswith(("S_", "ICL_", "saturn_"))
@@ -109,6 +110,7 @@ class DoubaoSpeechClient:
                 "req_params": {
                     "text": text,
                     "speaker": speaker_id,
+                    **({"language": language} if language else {}),
                     **(
                         {"model": "seed-tts-2.0-expressive"}
                         if speaker_id.startswith(("S_", "ICL_", "saturn_"))
