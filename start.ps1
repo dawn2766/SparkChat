@@ -28,17 +28,26 @@ function Get-DotEnvValue([string]$Name, [string]$Default) {
 $speechPort = [int](Get-DotEnvValue "SPEECH_ENGINE_PORT" "3101")
 $clientPort = [int](Get-DotEnvValue "CLIENT_PORT" "3002")
 
-if (-not (Get-NetTCPConnection -State Listen -LocalPort $speechPort -ErrorAction SilentlyContinue)) {
-    Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
-        "-NoExit", "-Command", "& '$python' server.py"
-    )
+function Stop-PortProcess([int]$Port) {
+    $connections = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
+    $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($processId in $processIds) {
+        if ($processId -and $processId -ne $PID) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
-if (-not (Get-NetTCPConnection -State Listen -LocalPort $clientPort -ErrorAction SilentlyContinue)) {
-    Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
-        "-NoExit", "-Command", "& '$python' token_server.py"
-    )
-}
+Stop-PortProcess $speechPort
+Stop-PortProcess $clientPort
+
+Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
+    "-NoExit", "-Command", "& '$python' server.py"
+)
+
+Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
+    "-NoExit", "-Command", "& '$python' token_server.py"
+)
 
 Write-Host "SparkChat 已启动" -ForegroundColor Green
 Write-Host "客户端: http://127.0.0.1:$clientPort" -ForegroundColor Cyan

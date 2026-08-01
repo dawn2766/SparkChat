@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import uuid
 
@@ -21,6 +22,7 @@ from doubao_realtime import (
 load_dotenv(override=True)
 
 DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+logger = logging.getLogger("sparkchat.realtime")
 
 
 def upstream_headers():
@@ -52,9 +54,9 @@ def session_payload(config):
     }
     if speaker_id.startswith(("S_", "ICL_", "saturn_")):
         if language:
-            payload["tts"]["extra"] = {"explicit_language": language, "tts_2.0_model": "seed-tts-2.0"}
+            payload["tts"]["extra"] = {"explicit_language": language, "tts_2.0_model": "expressive"}
         else:
-            payload["tts"]["extra"] = {"tts_2.0_model": "seed-tts-2.0"}
+            payload["tts"]["extra"] = {"tts_2.0_model": "expressive"}
         payload["dialog"] = {
             "character_manifest": (
                 config.get("persona", "保持自然、简洁、有帮助。")
@@ -88,6 +90,7 @@ async def forward_upstream(upstream, browser):
     except asyncio.CancelledError:
         raise
     except Exception as error:
+        logger.exception("Realtime voice session failed")
         await browser.send(json.dumps({
             "type": "error",
             "message": f"豆包实时语音上游连接异常：{error}",
@@ -135,6 +138,7 @@ async def handle_browser(browser):
 
 
 async def main():
+    logging.basicConfig(level=logging.INFO)
     port = int(os.getenv("SPEECH_ENGINE_PORT", "3101"))
     async with websockets.serve(handle_browser, "127.0.0.1", port, max_size=None):
         print(f"Doubao realtime proxy listening on ws://127.0.0.1:{port}")

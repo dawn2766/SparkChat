@@ -89,7 +89,6 @@ async function speak(text, button = null) {
     speechRequest = null;
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      if (data.actionUrl) window.open(data.actionUrl, "_blank", "noopener,noreferrer");
       throw Error(data.error || "语音生成失败");
     }
     speechUrl = URL.createObjectURL(await response.blob());

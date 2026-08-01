@@ -44,7 +44,7 @@ class SparkChatApiTest(unittest.TestCase):
             "准备行动。 现在出发。",
         )
 
-    def test_designed_voice_uses_expressive_tts_2_model(self):
+    def test_cloned_voice_uses_v3_voice_clone_2_model_and_api_key(self):
         import base64
         import json
         from doubao_speech import DoubaoSpeechClient
@@ -52,8 +52,9 @@ class SparkChatApiTest(unittest.TestCase):
         captured = {}
         client = DoubaoSpeechClient(api_key="test-key")
 
-        def fake_post(_url, payload, **_kwargs):
+        def fake_post(_url, payload, **kwargs):
             captured.update(payload)
+            captured.update(kwargs)
             event = {"code": 0, "data": base64.b64encode(b"audio").decode("ascii")}
             return f"data: {json.dumps(event)}\n".encode("utf-8"), {}
 
@@ -62,8 +63,32 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(audio, b"audio")
         self.assertEqual(content_type, "audio/mpeg")
-        self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-expressive")
+        self.assertEqual(captured["resource_id"], "seed-icl-2.0")
+        self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-standard")
         self.assertEqual(captured["req_params"]["audio_params"]["speech_rate"], -8)
+        headers = client._headers(captured["resource_id"])
+        self.assertEqual(headers["X-Api-Key"], "test-key")
+        self.assertNotIn("X-Api-App-Key", headers)
+        self.assertNotIn("X-Api-Access-Key", headers)
+
+    def test_preset_voice_resource_matches_its_model_generation(self):
+        import base64
+        import json
+        from doubao_speech import DoubaoSpeechClient
+
+        resources = []
+        client = DoubaoSpeechClient(api_key="test-key")
+
+        def fake_post(_url, _payload, **kwargs):
+            resources.append(kwargs["resource_id"])
+            event = {"code": 0, "data": base64.b64encode(b"audio").decode("ascii")}
+            return f"data: {json.dumps(event)}\n".encode("utf-8"), {}
+
+        client._post = fake_post
+        client.synthesize("zh_male_baqiqingshu_mars_bigtts", "测试")
+        client.synthesize("zh_female_vv_uranus_bigtts", "测试")
+
+        self.assertEqual(resources, ["seed-tts-1.0", "seed-tts-2.0"])
 
     def test_speech_quota_error_returns_service_unavailable(self):
         import token_server
@@ -179,6 +204,21 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertLess(final_prompt.index("身份背景：身份设定"), final_prompt.index("回答要求："))
         self.assertNotIn("用户记忆", final_prompt)
 
+    def test_agent_instructions_accept_sqlite_rows(self):
+        import sqlite3
+        from token_server import build_agent_instructions
+
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("CREATE TABLE characters (name TEXT, persona TEXT, voice_id TEXT)")
+        connection.execute("INSERT INTO characters VALUES (?, ?, ?)", ("测试角色", "身份设定", "megadeep"))
+        character = connection.execute("SELECT * FROM characters").fetchone()
+
+        instructions = build_agent_instructions(character)
+
+        self.assertIn("角色名称：测试角色", instructions)
+        self.assertIn("Response requirements:", instructions)
+
     def test_session_cookie_survives_new_client(self):
         self.login()
         cookie = next(cookie for cookie in self.client.get_cookie("session").value.split(";") if cookie)
@@ -254,6 +294,69 @@ class SparkChatApiTest(unittest.TestCase):
             else:
                 os.environ["DOUBAO_SPEECH_ACCESS_KEY"] = original_access_key
 
+    def test_https_token_never_returns_insecure_local_websocket_url(self):
+        import token_server
+
+        original_app_id = os.environ.get("DOUBAO_SPEECH_APP_ID")
+        original_access_key = os.environ.get("DOUBAO_SPEECH_ACCESS_KEY")
+        original_public_ws = os.environ.get("DOUBAO_REALTIME_PUBLIC_WS")
+        try:
+            os.environ["DOUBAO_SPEECH_APP_ID"] = "test-app-id"
+            os.environ["DOUBAO_SPEECH_ACCESS_KEY"] = "test-access-key"
+            os.environ["DOUBAO_REALTIME_PUBLIC_WS"] = "ws://127.0.0.1:3101"
+            login = self.client.post(
+                "/api/auth/login",
+                json={"username": "CaraLin", "password": "2766"},
+                base_url="https://visionvoice.cn/sparkchat/",
+            )
+            self.assertEqual(login.status_code, 200)
+            response = self.client.get(
+                "/api/token?characterId=1",
+                base_url="https://visionvoice.cn/sparkchat/",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json["websocketUrl"], "/sparkchat/realtime")
+        finally:
+            for name, value in (
+                ("DOUBAO_SPEECH_APP_ID", original_app_id),
+                ("DOUBAO_SPEECH_ACCESS_KEY", original_access_key),
+                ("DOUBAO_REALTIME_PUBLIC_WS", original_public_ws),
+            ):
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+    def test_cloned_voice_realtime_session_uses_expressive_model(self):
+        from server import session_payload
+
+        payload = session_payload({
+            "speakerId": "S_test_voice",
+            "language": "en",
+            "name": "Test",
+            "persona": "Stay concise.",
+        })
+
+        self.assertEqual(payload["tts"]["speaker"], "S_test_voice")
+        self.assertEqual(payload["tts"]["extra"]["explicit_language"], "en")
+        self.assertEqual(payload["tts"]["extra"]["tts_2.0_model"], "expressive")
+
+    def test_realtime_voice_mapping_is_independent_from_cloned_tts_voice(self):
+        import token_server
+
+        original_voice = os.environ.get("SPARKCHAT_REALTIME_VOICE_MEGADEEP")
+        try:
+            os.environ["SPARKCHAT_REALTIME_VOICE_MEGADEEP"] = "zh_male_xiaotian_jupiter_bigtts"
+            self.login()
+            response = self.client.get("/api/token?characterId=1")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json["speakerId"], "zh_male_xiaotian_jupiter_bigtts")
+        finally:
+            if original_voice is None:
+                os.environ.pop("SPARKCHAT_REALTIME_VOICE_MEGADEEP", None)
+            else:
+                os.environ["SPARKCHAT_REALTIME_VOICE_MEGADEEP"] = original_voice
+
     def test_user_can_update_custom_and_override_preset_character(self):
         self.login()
         created = self.client.post(
@@ -276,13 +379,13 @@ class SparkChatApiTest(unittest.TestCase):
                 "memory": "新的记忆。",
                 "voiceId": "ironvow",
                 "voiceName": "钢铁誓言",
-                "avatarUrl": "data:image/webp;base64,V0VCUA==",
+                "avatarUrl": "data:image/jpeg;base64,/9j/4AAQ",
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["character"]["name"], "已修改角色")
         self.assertEqual(response.json["character"]["voiceId"], "ironvow")
-        self.assertEqual(response.json["character"]["avatarUrl"], "data:image/webp;base64,V0VCUA==")
+        self.assertEqual(response.json["character"]["avatarUrl"], "data:image/jpeg;base64,/9j/4AAQ")
 
         preset_id = self.client.get("/api/characters").json["characters"][0]["id"]
         overridden = self.client.patch(

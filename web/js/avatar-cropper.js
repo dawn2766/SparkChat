@@ -7,9 +7,9 @@ export function avatarFieldMarkup({ currentUrl = "", id = "avatar" } = {}) {
   const image = currentUrl ? `<img src="${esc(currentUrl)}" alt="">` : '<span class="avatar-placeholder">+</span>';
   return `<section class="avatar-field" data-avatar-editor="${id}">
     <input type="hidden" name="avatarUrl" value="${esc(currentUrl)}">
-    <input class="avatar-file-input" id="${id}-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+    <input class="avatar-file-input" id="${id}-file" type="file" accept="image/*" hidden>
     <div class="avatar-field-preview" data-avatar-preview>${image}</div>
-    <div class="avatar-field-copy"><strong>角色头像</strong><span>JPG、PNG 或 WebP，最大 8 MB</span></div>
+    <div class="avatar-field-copy"><strong>角色头像</strong><span>支持常见图片格式，上传前会自动压缩</span></div>
     <label class="secondary-button avatar-choose" for="${id}-file">${currentUrl ? "更换" : "选择图片"}</label>
   </section>
   <dialog class="app-dialog crop-dialog" data-crop-dialog>
@@ -102,8 +102,8 @@ export function bindAvatarEditor(root) {
   fileInput.onchange = () => {
     const file = fileInput.files[0];
     if (!file) return;
-    if (!file.type.startsWith("image/") || file.size > 8 * 1024 * 1024) {
-      notify("请选择 8 MB 以内的 JPG、PNG 或 WebP 图片");
+    if (file.type && !file.type.startsWith("image/")) {
+      notify("请选择图片文件");
       fileInput.value = "";
       return;
     }
@@ -230,7 +230,7 @@ export function bindAvatarEditor(root) {
     const sourceWidth = CROP_SIZE / image.width * sourceImage.naturalWidth;
     const sourceHeight = CROP_SIZE / image.height * sourceImage.naturalHeight;
     canvas.getContext("2d").drawImage(sourceImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
-    renderPreview(canvas.toDataURL("image/webp", 0.88));
+    renderPreview(canvas.toDataURL("image/jpeg", 0.84));
     closeCropper();
   };
 

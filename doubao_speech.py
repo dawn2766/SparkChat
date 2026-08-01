@@ -6,6 +6,10 @@ from urllib import error, request
 
 
 SPEECH_CONSOLE_URL = "https://console.volcengine.com/speech/new"
+TTS_1_RESOURCE_ID = "seed-tts-1.0"
+TTS_2_RESOURCE_ID = "seed-tts-2.0"
+VOICE_CLONE_RESOURCE_ID = "seed-icl-2.0"
+VOICE_CLONE_MODEL = "seed-tts-2.0-standard"
 
 
 class DoubaoSpeechError(RuntimeError):
@@ -24,40 +28,31 @@ class DoubaoSpeechError(RuntimeError):
 
 
 class DoubaoSpeechClient:
-    def __init__(self, api_key=None, app_id=None, access_key=None, timeout=60):
+    def __init__(self, api_key=None, timeout=60):
         self.api_key = api_key or os.getenv("DOUBAO_SPEECH_API_KEY")
-        self.app_id = app_id or os.getenv("DOUBAO_SPEECH_APP_ID")
-        self.access_key = access_key or os.getenv("DOUBAO_SPEECH_ACCESS_KEY")
         self.timeout = timeout
 
     @property
     def configured(self):
-        return bool(self.api_key or (self.app_id and self.access_key))
+        return bool(self.api_key)
 
-    def _headers(self, resource_id=None, prefer_legacy=False):
+    def _headers(self, resource_id=None):
         headers = {
             "Content-Type": "application/json",
             "X-Api-Request-Id": str(uuid.uuid4()),
+            "X-Api-Key": self.api_key or "",
         }
-        if self.api_key and not prefer_legacy:
-            headers["X-Api-Key"] = self.api_key
-        else:
-            headers["X-Api-App-Key"] = self.app_id or ""
-            headers["X-Api-Access-Key"] = self.access_key or ""
         if resource_id:
             headers["X-Api-Resource-Id"] = resource_id
         return headers
 
-    def realtime_headers(self, resource_id=None):
-        return self._headers(resource_id)
-
-    def _post(self, url, payload, resource_id=None, prefer_legacy=False):
+    def _post(self, url, payload, resource_id=None):
         if not self.configured:
             raise DoubaoSpeechError("服务器尚未配置豆包语音凭证", status_code=503)
         api_request = request.Request(
             url,
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers=self._headers(resource_id, prefer_legacy),
+            headers=self._headers(resource_id),
             method="POST",
         )
         try:
@@ -88,7 +83,6 @@ class DoubaoSpeechClient:
                 "prompt": {"text_prompt": text_prompt},
                 "language": 0,
             },
-            prefer_legacy=bool(self.app_id and self.access_key),
         )
         result = json.loads(body.decode("utf-8"))
         if result.get("icl_list"):
@@ -96,12 +90,14 @@ class DoubaoSpeechClient:
         return result
 
     def synthesize(self, speaker_id, text):
-        language = os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if speaker_id.startswith(("S_", "ICL_", "saturn_")) else ""
-        resource_id = (
-            os.getenv("DOUBAO_ICL_TTS_RESOURCE_ID", "seed-icl-2.0")
-            if speaker_id.startswith(("S_", "ICL_", "saturn_"))
-            else os.getenv("DOUBAO_TTS_RESOURCE_ID", "seed-tts-1.0")
-        )
+        is_cloned_voice = speaker_id.startswith(("S_", "ICL_", "saturn_"))
+        language = os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if is_cloned_voice else ""
+        if is_cloned_voice:
+            resource_id = VOICE_CLONE_RESOURCE_ID
+        elif "_uranus_" in speaker_id:
+            resource_id = TTS_2_RESOURCE_ID
+        else:
+            resource_id = TTS_1_RESOURCE_ID
         body, headers = self._post(
             "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
             {
@@ -111,20 +107,15 @@ class DoubaoSpeechClient:
                     "text": text,
                     "speaker": speaker_id,
                     **({"language": language} if language else {}),
-                    **(
-                        {"model": "seed-tts-2.0-expressive"}
-                        if speaker_id.startswith(("S_", "ICL_", "saturn_"))
-                        else {}
-                    ),
+                    **({"model": VOICE_CLONE_MODEL} if is_cloned_voice else {}),
                     "audio_params": {
                         "format": "mp3",
                         "sample_rate": 24000,
-                        "speech_rate": -8 if speaker_id.startswith(("S_", "ICL_", "saturn_")) else 0,
+                        "speech_rate": -8 if is_cloned_voice else 0,
                     },
                 },
             },
             resource_id=resource_id,
-            prefer_legacy=speaker_id.startswith(("S_", "ICL_", "saturn_")),
         )
         audio_parts = []
         for line in body.decode("utf-8").splitlines():

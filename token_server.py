@@ -125,6 +125,14 @@ def doubao_realtime_speaker_id(character):
         return configured
     return doubao_speaker_id(character)
 
+
+def realtime_websocket_url():
+    configured_url = os.getenv("DOUBAO_REALTIME_PUBLIC_WS", "/sparkchat/realtime").strip()
+    if request.is_secure and configured_url.startswith("ws://"):
+        app.logger.error("DOUBAO_REALTIME_PUBLIC_WS must use wss:// or a same-origin path over HTTPS")
+        return "/sparkchat/realtime"
+    return configured_url
+
 def character_instructions(character):
     sections = [
         f"角色名称：{character['name']}",
@@ -134,7 +142,8 @@ def character_instructions(character):
 
 
 def build_agent_instructions(character):
-    system_prompt = ENGLISH_SYSTEM_PROMPT if character.get("voice_id") == "megadeep" else SYSTEM_PROMPT
+    voice_id = character["voice_id"] if "voice_id" in character.keys() else None
+    system_prompt = ENGLISH_SYSTEM_PROMPT if voice_id == "megadeep" else SYSTEM_PROMPT
     return f"{character_instructions(character)}\n\n{system_prompt}"
 
 
@@ -293,11 +302,9 @@ def avatar_url_from(payload, default=""):
     avatar_url = str(payload.get("avatarUrl", default)).strip()
     if avatar_url and not (
         avatar_url.startswith("/assets/")
-        or avatar_url.startswith("data:image/webp;base64,")
+        or re.match(r"^data:image/(?:jpeg|jpg|png|webp);base64,", avatar_url)
     ):
         raise ValueError("头像格式无效")
-    if len(avatar_url) > 500_000:
-        raise ValueError("头像文件过大")
     return avatar_url
 
 
@@ -669,7 +676,7 @@ def get_token():
             actionUrl=SPEECH_CONSOLE_URL,
         ), 503
     return jsonify(
-        websocketUrl=os.getenv("DOUBAO_REALTIME_PUBLIC_WS", "/sparkchat/realtime"),
+        websocketUrl=realtime_websocket_url(),
         resourceId=os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
         speakerId=speaker_id,
         language=os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if speaker_id.startswith(("S_", "ICL_", "saturn_")) else "",
