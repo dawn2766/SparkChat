@@ -59,12 +59,13 @@ class SparkChatApiTest(unittest.TestCase):
             return f"data: {json.dumps(event)}\n".encode("utf-8"), {}
 
         client._post = fake_post
-        audio, content_type = client.synthesize("S_test_voice", "测试")
+        audio, content_type = client.synthesize("S_test_voice", "测试", "en")
 
         self.assertEqual(audio, b"audio")
         self.assertEqual(content_type, "audio/mpeg")
         self.assertEqual(captured["resource_id"], "seed-icl-2.0")
         self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-standard")
+        self.assertEqual(captured["req_params"]["language"], "en")
         self.assertEqual(captured["req_params"]["audio_params"]["speech_rate"], -8)
         headers = client._headers(captured["resource_id"])
         self.assertEqual(headers["X-Api-Key"], "test-key")
@@ -98,7 +99,7 @@ class SparkChatApiTest(unittest.TestCase):
             configured = True
 
             @staticmethod
-            def synthesize(_voice_id, _text):
+            def synthesize(_voice_id, _text, _language):
                 raise DoubaoSpeechError("quota exceeded", status_code=429)
 
         original_client = token_server.doubao_speech
@@ -128,7 +129,7 @@ class SparkChatApiTest(unittest.TestCase):
             configured = True
 
             @staticmethod
-            def synthesize(_voice_id, _text):
+            def synthesize(_voice_id, _text, _language):
                 raise DoubaoSpeechError("unauthorized resource", status_code=403)
 
         original_client = token_server.doubao_speech
@@ -158,7 +159,7 @@ class SparkChatApiTest(unittest.TestCase):
             configured = True
 
             @staticmethod
-            def synthesize(_voice_id, _text):
+            def synthesize(_voice_id, _text, _language):
                 raise DoubaoSpeechError("Invalid X-Api-Key", code=45000010)
 
         original_client = token_server.doubao_speech
@@ -186,8 +187,6 @@ class SparkChatApiTest(unittest.TestCase):
         prompt = character_instructions({
             "name": "测试角色",
             "persona": "身份设定",
-            "background": "背景经历",
-            "memory": "用户记忆",
         })
         self.assertIn("角色名称：测试角色", prompt)
         self.assertIn("身份背景：身份设定", prompt)
@@ -198,8 +197,7 @@ class SparkChatApiTest(unittest.TestCase):
         final_prompt = build_agent_instructions({
             "name": "测试角色",
             "persona": "身份设定",
-            "background": "",
-            "memory": "",
+            "language": "zh",
         })
         self.assertLess(final_prompt.index("身份背景：身份设定"), final_prompt.index("回答要求："))
         self.assertNotIn("用户记忆", final_prompt)
@@ -210,14 +208,15 @@ class SparkChatApiTest(unittest.TestCase):
 
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
-        connection.execute("CREATE TABLE characters (name TEXT, persona TEXT, voice_id TEXT)")
-        connection.execute("INSERT INTO characters VALUES (?, ?, ?)", ("测试角色", "身份设定", "megadeep"))
+        connection.execute("CREATE TABLE characters (name TEXT, persona TEXT, language TEXT)")
+        connection.execute("INSERT INTO characters VALUES (?, ?, ?)", ("测试角色", "身份设定", "en"))
         character = connection.execute("SELECT * FROM characters").fetchone()
 
         instructions = build_agent_instructions(character)
 
         self.assertIn("角色名称：测试角色", instructions)
-        self.assertIn("Response requirements:", instructions)
+        self.assertIn("回答要求：", instructions)
+        self.assertIn("必须只使用自然、准确、简洁的英文回答", instructions)
 
     def test_session_cookie_survives_new_client(self):
         self.login()
@@ -234,10 +233,7 @@ class SparkChatApiTest(unittest.TestCase):
             "/api/characters",
             json={
                 "name": "测试角色",
-                "tagline": "集成测试",
                 "persona": "保持简洁。",
-                "background": "测试背景。",
-                "memory": "测试记忆。",
                 "voiceId": "S_test_custom",
                 "voiceName": "豆包测试音色",
                 "avatarUrl": "data:image/webp;base64,UklGRg==",
@@ -339,8 +335,7 @@ class SparkChatApiTest(unittest.TestCase):
         payload = session_payload({
             "speakerId": "S_test_voice",
             "language": "en",
-            "name": "Test",
-            "persona": "Stay concise.",
+            "instructions": "Stay concise.",
         })
 
         self.assertEqual(payload["tts"]["speaker"], "S_test_voice")
@@ -369,14 +364,36 @@ class SparkChatApiTest(unittest.TestCase):
             "name": "Megatron",
             "persona": "Identity",
             "voice_id": "megadeep",
+            "language": "en",
         }
-        config = realtime_character_config(character, "S_test_voice")
+        config = realtime_character_config(character)
         payload = session_payload({"speakerId": "S_test_voice", **config})
 
         self.assertEqual(config["instructions"], build_agent_instructions(character))
         self.assertEqual(config["language"], "en")
         self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
-        self.assertIn("mechanical commander", payload["dialog"]["character_manifest"])
+        self.assertIn("机械统帅", payload["dialog"]["character_manifest"])
+
+    def test_character_model_is_used_for_text_generation(self):
+        import token_server
+
+        captured = {}
+
+        class FakeResponses:
+            @staticmethod
+            def create(**kwargs):
+                captured.update(kwargs)
+                return []
+
+        original_responses = token_server.ark.responses
+        token_server.ark.responses = FakeResponses()
+        try:
+            self.login()
+            response = self.client.post("/api/characters/1/chat", json={"content": "测试"})
+            list(response.response)
+            self.assertEqual(captured["model"], "doubao-seed-character-260628")
+        finally:
+            token_server.ark.responses = original_responses
 
     def test_custom_cloned_voice_does_not_get_megatron_delivery(self):
         from server import session_payload
@@ -386,12 +403,13 @@ class SparkChatApiTest(unittest.TestCase):
             "name": "Custom",
             "persona": "保持温和。",
             "voice_id": "S_custom",
+            "language": "zh",
         }
-        config = realtime_character_config(character, "S_custom")
+        config = realtime_character_config(character)
         payload = session_payload({"speakerId": "S_custom", **config})
 
-        self.assertNotIn("mechanical commander", payload["dialog"]["character_manifest"])
-        self.assertIn("始终使用自然、准确、简洁的中文", config["instructions"])
+        self.assertNotIn("机械统帅", payload["dialog"]["character_manifest"])
+        self.assertIn("必须只使用自然、准确、简洁的中文回答", config["instructions"])
 
     def test_realtime_voice_mapping_is_independent_from_cloned_tts_voice(self):
         import token_server
@@ -425,10 +443,7 @@ class SparkChatApiTest(unittest.TestCase):
             f"/api/characters/{character_id}",
             json={
                 "name": "已修改角色",
-                "tagline": "新的定位",
                 "persona": "回答简洁。",
-                "background": "新的背景。",
-                "memory": "新的记忆。",
                 "voiceId": "ironvow",
                 "voiceName": "钢铁誓言",
                 "avatarUrl": "data:image/jpeg;base64,/9j/4AAQ",

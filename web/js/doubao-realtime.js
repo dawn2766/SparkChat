@@ -29,17 +29,8 @@ function resample(samples, fromRate, toRate) {
 function assistantText(data) {
   if (!data) return "";
   if (typeof data === "string") return data;
-  if (Array.isArray(data)) return data.map(assistantText).filter(Boolean).join("");
   if (typeof data !== "object") return "";
-  for (const key of ["content", "text", "delta", "answer", "response", "message"]) {
-    const value = assistantText(data[key]);
-    if (value) return value;
-  }
-  for (const key of ["data", "result", "results", "payload"]) {
-    const value = assistantText(data[key]);
-    if (value) return value;
-  }
-  return "";
+  return String(data.content || data.text || "");
 }
 
 export async function createRealtimeSession(character, handlers = {}, options = {}) {
@@ -58,6 +49,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let closed = false;
   let playbackTimer = 0;
   let assistantTurnText = "";
+  let assistantQuestionId = "";
   const playbackNodes = new Set();
 
   const reportPlaybackState = () => {
@@ -124,11 +116,15 @@ export async function createRealtimeSession(character, handlers = {}, options = 
       }
       if (message.event === 451) {
         (data.results || []).forEach((result) => {
-          if (!result.is_interim && result.text) assistantTurnText = "";
           handlers.onTranscript?.({ text: result.text, interim: result.is_interim });
         });
       }
-      if (message.event !== 451) {
+      if (message.event === 350 || message.event === 550) {
+        const questionId = String(data.question_id || "");
+        if (questionId && questionId !== assistantQuestionId) {
+          assistantQuestionId = questionId;
+          assistantTurnText = "";
+        }
         const text = assistantText(data);
         if (text) {
           const mergedText = mergeRealtimeText(assistantTurnText, text);

@@ -40,8 +40,8 @@ def upstream_headers():
 def session_payload(config):
     speaker_id = config["speakerId"]
     language = config.get("language", "")
-    instructions = config.get("instructions") or config.get("persona", "保持自然、简洁、有帮助。")
-    speaking_style = config.get("speakingStyle", "Speak naturally and clearly.")
+    instructions = config["instructions"]
+    speaking_style = config.get("speakingStyle", "自然、清晰地说话，同时保持角色自身的语气。")
     is_o2_clone = speaker_id.startswith("ICL_uranus_")
     is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_")) and not is_o2_clone
     payload = {
@@ -58,7 +58,7 @@ def session_payload(config):
         payload["tts"]["extra"] = {"explicit_language": language}
     if is_sc2_voice:
         payload["dialog"] = {
-            "character_manifest": f"{instructions}\n\nDelivery: {speaking_style}",
+            "character_manifest": f"{instructions}\n\n说话方式：{speaking_style}",
             "extra": {"model": "2.2.0.0", "input_mod": "keep_alive"},
         }
     else:

@@ -115,6 +115,7 @@ export function renderCreate({ bindShell, onCreated }) {
     <section class="section">${avatarFieldMarkup({ id: "create-avatar" })}</section>
     <section class="section"><div class="field"><label for="character-name">角色名称</label><input class="text-input" id="character-name" name="name" required maxlength="40" placeholder="例如：阿尔茜"></div></section>
     <section class="section"><div class="field"><label for="persona">身份背景</label><textarea class="text-area" id="persona" name="persona" required maxlength="2400" placeholder="角色的身份、经历、性格、价值观与表达方式"></textarea></div></section>
+    <section class="section"><div class="field"><label for="language">回答语言</label><select class="select-input" id="language" name="language"><option value="zh" selected>中文</option><option value="en">英文</option></select></div></section>
     <section class="section"><div class="section-header"><div class="section-title"><h2>角色音色</h2></div></div><div class="voice-picker"><div class="field"><label for="voice-select">音色</label><select class="select-input" id="voice-select" name="voiceId">${voiceOptions(selected?.id)}</select><input type="hidden" name="voiceName" value="${esc(selected?.name || "")}"></div><button class="secondary-button studio-launch" type="button" id="open-voice-studio"><i data-lucide="sliders-horizontal"></i><span>自定义音色</span></button></div></section>
     <div class="form-actions"><button class="primary-button full-width" type="submit">创建角色</button></div>
   </form>${studioMarkup()}`;

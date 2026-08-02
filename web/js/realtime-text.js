@@ -1,6 +1,7 @@
 export function mergeRealtimeText(current, incoming) {
-  const next = String(incoming || "").trim();
-  if (!next) return current;
+  const raw = String(incoming || "");
+  if (!raw.trim()) return current;
+  const next = current ? raw.trimEnd() : raw.trim();
   if (!current || next.startsWith(current)) return next;
   if (current.includes(next)) return current;
   const overlapLimit = Math.min(current.length, next.length);

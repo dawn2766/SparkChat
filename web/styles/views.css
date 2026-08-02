@@ -702,6 +702,26 @@
   font: 8px var(--font-mono);
 }
 
+.message-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.message-action {
+  width: 22px;
+  height: 19px;
+  display: inline-grid;
+  place-items: center;
+  padding: 2px 5px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.message-action:disabled { opacity: .45; }
+.message-action svg { width: 13px; height: 13px; }
+
 .speak-button {
   width: 22px;
   height: 19px;
@@ -893,16 +913,39 @@
 .phone-overlay.speaking .voice-bars i { animation-duration: .55s; }
 .phone-overlay.call-error { --accent: var(--danger); }
 
-.phone-subtitle {
-  min-height: 60px;
-  max-width: 330px;
+.phone-subtitles {
+  width: min(100%, 340px);
+  min-height: 126px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
   margin-top: 10px;
+}
+
+.phone-subtitle {
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 3%);
+  max-width: 330px;
   color: #dce2de;
   font-size: 14px;
   line-height: 1.65;
   letter-spacing: 0;
   overflow-wrap: anywhere;
 }
+
+.phone-subtitle::before {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--faint);
+  font: 8px var(--font-mono);
+}
+
+.user-subtitle { color: var(--muted); }
+.user-subtitle::before { content: "用户"; }
+.assistant-subtitle::before { content: "角色"; color: var(--accent); }
+.user-subtitle.interim { opacity: .65; }
 
 .call-mode {
   display: flex;

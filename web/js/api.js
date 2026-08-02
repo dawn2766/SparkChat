@@ -19,8 +19,11 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export async function streamChat(characterId, content, onDelta) {
-  const response = await fetch(apiUrl(`/api/characters/${characterId}/chat`), {
+export async function streamChat(characterId, content, onDelta, messageId = null) {
+  const path = messageId
+    ? `/api/characters/${characterId}/messages/${messageId}/regenerate`
+    : `/api/characters/${characterId}/chat`;
+  const response = await fetch(apiUrl(path), {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -36,6 +39,7 @@ export async function streamChat(characterId, content, onDelta) {
   const decoder = new TextDecoder();
   let buffer = "";
   let answer = "";
+  let resultMessageId = messageId;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -49,9 +53,10 @@ export async function streamChat(characterId, content, onDelta) {
         answer += data.text;
         onDelta(answer);
       }
+      if (data.type === "done") resultMessageId = data.messageId;
       if (data.type === "error") throw Error(data.message);
     }
   }
   if (!answer.trim()) throw Error("角色没有返回有效内容");
-  return answer;
+  return { answer, messageId: resultMessageId };
 }

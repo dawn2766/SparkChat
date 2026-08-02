@@ -15,5 +15,21 @@ assert.equal(
   "State your purpose.",
 );
 assert.equal(mergeRealtimeText("Cyber", "bertron"), "Cybertron");
+assert.equal(
+  mergeRealtimeText("State", " your purpose."),
+  "State your purpose.",
+);
+assert.equal(
+  mergeRealtimeText("State your", " purpose."),
+  "State your purpose.",
+);
+assert.equal(
+  mergeRealtimeText("State your purpose", "State your purpose."),
+  "State your purpose.",
+);
+assert.equal(
+  mergeRealtimeText("准备行动", "准备行动。"),
+  "准备行动。",
+);
 
 console.log("Realtime subtitle merge tests passed.");

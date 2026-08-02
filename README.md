@@ -17,12 +17,11 @@ pip install -r requirements.txt
 DOUBAO_SPEECH_API_KEY=
 
 DOUBAO_VOICE_DESIGN_SPEAKER_IDS=S_资源1,S_资源2
-DOUBAO_ICL_LANGUAGE=en
 DOUBAO_REALTIME_RESOURCE_ID=volc.speech.dialog
 DOUBAO_REALTIME_PUBLIC_WS=/sparkchat/realtime
 
 ARK_API_KEY=
-ARK_MODEL=doubao-seed-2-1-pro-260628
+ARK_MODEL=doubao-seed-character-260628
 FLASK_SECRET_KEY=请使用稳定的长随机字符串
 
 SPEECH_ENGINE_PORT=3101
@@ -35,6 +34,8 @@ SPARKCHAT_VOICE_IRONVOW=
 SPARKCHAT_VOICE_STARLIGHT=
 SPARKCHAT_VOICE_ARCHIVE=
 ```
+
+文本角色回复使用火山方舟模型列表中的 `doubao-seed-character-260628`，也可以通过 `ARK_MODEL` 指定项目内已开通的同类接入点。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
 
 `DOUBAO_VOICE_DESIGN_SPEAKER_IDS` 是控制台购买的空白 `S_` 音色资源池。每个资源只会分配给一个用户设计音色。声音复刻 V3 状态接口会为 ICL V3 音色返回 `ICL_uranus_...` 实时映射 ID；该 ID 使用 O2.0，`saturn_` 和 SC2.0 实时克隆音色使用 SC2.0。
 
@@ -49,6 +50,8 @@ SPARKCHAT_VOICE_ARCHIVE=
 ```powershell
 python server.py
 ```
+
+文本 Web 服务和实时语音代理需要同时运行。实时代理使用 `SPEECH_ENGINE_PORT`，公网 Nginx 应将 `DOUBAO_REALTIME_PUBLIC_WS` 对应路径转发到该端口。
 
 ```powershell
 python token_server.py

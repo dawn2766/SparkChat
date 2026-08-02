@@ -1,11 +1,11 @@
-import { createIcons, Mic, MicOff, Pause, Phone, PhoneOff, Play, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { createIcons, Copy, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
-const refreshIcons = () => createIcons({ icons: { Mic, MicOff, Pause, Phone, PhoneOff, Play, Settings2, Volume2 } });
+const refreshIcons = () => createIcons({ icons: { Copy, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -56,9 +56,19 @@ function resetTextareaSize(textarea) {
   textarea.style.overflowY = "";
 }
 
+function messageActionsMarkup(message, isAssistant) {
+  if (!isAssistant) return "";
+  return `<span class="message-actions"><button class="message-action" data-copy="${esc(message.content)}" aria-label="复制${isAssistant ? "这条回复" : "这条消息"}"><i data-lucide="copy"></i></button>${isAssistant ? `<button class="message-action" data-regenerate="${message.id || ""}" aria-label="重新生成这条回复"><i data-lucide="refresh-cw"></i></button><button class="speak-button" data-speak="${esc(message.content)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button>` : ""}</span>`;
+}
+
+function assistantStampMarkup(message, character) {
+  return `<span class="stamp">${messageActionsMarkup(message, true)}</span>`;
+}
+
 function messageMarkup(message, character) {
-  const stamp = message.role === "user" ? "" : `<span class="stamp">${esc(character.name.toUpperCase())} <button class="speak-button" data-speak="${esc(message.content)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
-  return `<div class="message ${message.role === "user" ? "user" : ""}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
+  const isAssistant = message.role === "assistant";
+  const stamp = isAssistant ? assistantStampMarkup(message, character) : messageActionsMarkup(message, false);
+  return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
 }
 
 function bindSpeechButtons() {
@@ -66,6 +76,54 @@ function bindSpeechButtons() {
     button.onclick = () => speak(button.dataset.speak, button);
   });
   refreshIcons();
+}
+
+function bindMessageActions() {
+  const container = document.querySelector("#messages");
+  if (!container) return;
+  container.onclick = async (event) => {
+    const copyButton = event.target.closest("[data-copy]");
+    if (copyButton) {
+      try {
+        await navigator.clipboard.writeText(copyButton.dataset.copy);
+        notify("已复制");
+      } catch (_error) {
+        notify("复制失败，请检查浏览器剪贴板权限");
+      }
+      return;
+    }
+    const regenerateButton = event.target.closest("[data-regenerate]");
+    if (!regenerateButton?.dataset.regenerate) return;
+    if (state.sending) return;
+    const message = regenerateButton.closest(".message");
+    const bubble = message.querySelector(".bubble");
+    const oldText = bubble.textContent;
+    state.sending = true;
+    regenerateButton.disabled = true;
+    message.classList.add("pending");
+    try {
+      const result = await streamChat(state.active.id, "", (partial) => {
+        bubble.textContent = partial;
+        message.classList.remove("pending");
+        scrollMessages();
+      }, Number(regenerateButton.dataset.regenerate));
+      bubble.textContent = result.answer;
+      message.dataset.messageId = result.messageId;
+      const index = state.messages.findIndex((item) => item.id === Number(result.messageId));
+      if (index >= 0) state.messages[index].content = result.answer;
+      message.querySelector("[data-speak]").dataset.speak = result.answer;
+      message.querySelector("[data-copy]").dataset.copy = result.answer;
+      message.classList.remove("pending");
+      notify("已生成新的回复");
+    } catch (error) {
+      bubble.textContent = oldText;
+      notify(error.message);
+    } finally {
+      state.sending = false;
+      regenerateButton.disabled = false;
+      message.classList.remove("pending");
+    }
+  };
 }
 
 async function speak(text, button = null) {
@@ -158,16 +216,17 @@ async function sendMessage(event) {
   const container = document.querySelector("#messages");
   const assistant = document.createElement("div");
   assistant.className = "message pending";
-  assistant.innerHTML = `<div><div class="bubble">正在回应…</div><span class="stamp">${esc(state.active.name.toUpperCase())}</span></div>`;
+  assistant.innerHTML = `<div><div class="bubble">正在回应…</div><span class="stamp"></span></div>`;
   container.insertAdjacentHTML("beforeend", messageMarkup({ role: "user", content }, state.active));
   container.append(assistant);
   const bubble = assistant.querySelector(".bubble");
   scrollMessages();
   try {
-    const answer = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); });
-    state.messages.push({ role: "assistant", content: answer });
+    const result = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); });
+    state.messages.push({ id: result.messageId, role: "assistant", content: result.answer });
     assistant.classList.remove("pending");
-    assistant.querySelector(".stamp").innerHTML = `${esc(state.active.name.toUpperCase())} <button class="speak-button" data-speak="${esc(answer)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button>`;
+    assistant.dataset.messageId = result.messageId;
+    assistant.querySelector(".stamp").outerHTML = assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active);
     bindSpeechButtons();
   } catch (error) {
     assistant.classList.remove("pending");
@@ -203,6 +262,7 @@ function settingsMarkup(character) {
         ${avatarFieldMarkup({ currentUrl: character.avatarUrl, id: "edit-avatar" })}
         <div class="field"><label for="edit-name">角色名称</label><input class="text-input" id="edit-name" name="name" maxlength="40" required value="${esc(character.name)}"></div>
         <div class="field"><label for="edit-persona">身份背景</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
+        <div class="field"><label for="edit-language">回答语言</label><select class="select-input" id="edit-language" name="language"><option value="zh" ${character.language === "zh" ? "selected" : ""}>中文</option><option value="en" ${character.language === "en" ? "selected" : ""}>英文</option></select></div>
         <div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>
       </div>
       <footer class="dialog-actions"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></footer>
@@ -219,6 +279,7 @@ function bindSettings(onBack) {
     form.persona.value = state.active.persona;
     form.voiceId.value = state.active.voiceId;
     form.voiceName.value = state.active.voiceName;
+    form.language.value = state.active.language || "zh";
     form.avatarUrl.value = state.active.avatarUrl || "";
     form.querySelector("[data-avatar-editor]").resetAvatar(state.active.avatarUrl || "");
     resetTextareaSize(form.persona);
@@ -262,12 +323,13 @@ function bindSettings(onBack) {
 async function startPhone() {
   const phone = document.createElement("div");
   phone.className = "phone-overlay connecting";
-  phone.innerHTML = `<main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitle" id="subtitle"></div></main>
+  phone.innerHTML = `<main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle user-subtitle" id="user-subtitle"></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"></div></div></main>
     <footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>`;
   document.body.append(phone);
   refreshIcons();
   const statusText = phone.querySelector("#phone-status-text");
-  const subtitle = phone.querySelector("#subtitle");
+  const userSubtitle = phone.querySelector("#user-subtitle");
+  const assistantSubtitle = phone.querySelector("#assistant-subtitle");
   const micButton = phone.querySelector("#toggle-mic");
   let cancelled = false;
   let muted = false;
@@ -311,14 +373,16 @@ async function startPhone() {
       onReady: () => setMode("listening"),
       onText: (text) => {
         if (!text) return;
-        subtitle.textContent = text.slice(-160);
+        assistantSubtitle.textContent = text;
       },
       onTranscript: (data) => {
-        if (!data.interim && data.text) subtitle.textContent = "";
+        userSubtitle.textContent = data.text || "";
+        userSubtitle.classList.toggle("interim", Boolean(data.interim));
+        if (!data.interim && data.text) assistantSubtitle.textContent = "";
         setMode("listening");
       },
       onPlaybackChange: (playing) => setMode(playing ? "speaking" : "listening"),
-      onError: (error) => { subtitle.textContent = error?.message || "语音连接发生错误"; },
+      onError: (error) => { assistantSubtitle.textContent = error?.message || "语音连接发生错误"; },
     });
     if (cancelled) {
       await conversation.stop();
@@ -332,7 +396,7 @@ async function startPhone() {
     phone.classList.remove("connecting", "listening", "speaking");
     phone.classList.add("call-error");
     statusText.textContent = "连接失败";
-    subtitle.textContent = error.message || "无法接通语音模式";
+    assistantSubtitle.textContent = error.message || "无法接通语音模式";
   }
 }
 
@@ -360,5 +424,6 @@ export function renderChat({ onBack }) {
   document.querySelector("#dictate").onclick = toggleDictation;
   bindSettings(onBack);
   bindSpeechButtons();
+  bindMessageActions();
   scrollMessages();
 }

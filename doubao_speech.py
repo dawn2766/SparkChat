@@ -89,9 +89,8 @@ class DoubaoSpeechClient:
             return result["icl_list"][0]
         return result
 
-    def synthesize(self, speaker_id, text):
+    def synthesize(self, speaker_id, text, language="zh"):
         is_cloned_voice = speaker_id.startswith(("S_", "ICL_", "saturn_"))
-        language = os.getenv("DOUBAO_ICL_LANGUAGE", "").strip() if is_cloned_voice else ""
         if is_cloned_voice:
             resource_id = VOICE_CLONE_RESOURCE_ID
         elif "_uranus_" in speaker_id:
@@ -106,7 +105,7 @@ class DoubaoSpeechClient:
                 "req_params": {
                     "text": text,
                     "speaker": speaker_id,
-                    **({"language": language} if language else {}),
+                    "language": language,
                     **({"model": VOICE_CLONE_MODEL} if is_cloned_voice else {}),
                     "audio_params": {
                         "format": "mp3",
