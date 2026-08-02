@@ -36,13 +36,34 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertTrue(response.json["characters"][0]["isPreset"])
         self.assertNotIn("unreadCount", response.json["characters"][0])
 
-    def test_nonverbal_stage_directions_are_removed_from_speech(self):
-        from token_server import strip_nonverbal_text
+    def test_old_preset_characters_are_removed_during_migration(self):
+        from token_server import get_db, init_db
 
-        self.assertEqual(
-            strip_nonverbal_text("（低声）准备行动。[金属碰撞声] *抬手* 现在出发。"),
-            "准备行动。 现在出发。",
+        with self.app.app_context():
+            database = get_db()
+            database.execute(
+                "INSERT INTO characters (name, persona, voice_id, voice_name, is_preset) VALUES (?, ?, ?, ?, 1)",
+                ("旧角色", "过期", "old_voice", "旧音色"),
+            )
+            database.commit()
+            init_db()
+            old_character = database.execute(
+                "SELECT id FROM characters WHERE name = ?", ("旧角色",)
+            ).fetchone()
+
+        self.assertIsNone(old_character)
+
+    def test_stage_directions_are_preserved_as_speech_cues(self):
+        from doubao_speech import prepare_speech_text
+
+        plain_text, expressive_text, cues = prepare_speech_text(
+            "（低声）准备行动。[金属碰撞声] *抬手* 现在出发。"
         )
+
+        self.assertEqual(plain_text, "准备行动。 现在出发。")
+        self.assertIn('<cot text="低声">准备行动。</cot>', expressive_text)
+        self.assertIn('<cot text="抬手"> 现在出发。</cot>', expressive_text)
+        self.assertEqual(cues, ["低声", "金属碰撞声", "抬手"])
 
     def test_cloned_voice_uses_v3_voice_clone_2_model_and_api_key(self):
         import base64
@@ -64,7 +85,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(audio, b"audio")
         self.assertEqual(content_type, "audio/mpeg")
         self.assertEqual(captured["resource_id"], "seed-icl-2.0")
-        self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-standard")
+        self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-expressive")
         self.assertEqual(captured["req_params"]["language"], "en")
         self.assertEqual(captured["req_params"]["audio_params"]["speech_rate"], -8)
         headers = client._headers(captured["resource_id"])
@@ -72,24 +93,32 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertNotIn("X-Api-App-Key", headers)
         self.assertNotIn("X-Api-Access-Key", headers)
 
-    def test_preset_voice_resource_matches_its_model_generation(self):
+    def test_cloned_voice_uses_stage_direction_cot(self):
         import base64
         import json
         from doubao_speech import DoubaoSpeechClient
 
-        resources = []
+        captured = {}
         client = DoubaoSpeechClient(api_key="test-key")
 
-        def fake_post(_url, _payload, **kwargs):
-            resources.append(kwargs["resource_id"])
+        def fake_post(_url, payload, **_kwargs):
+            captured.update(payload["req_params"])
             event = {"code": 0, "data": base64.b64encode(b"audio").decode("ascii")}
             return f"data: {json.dumps(event)}\n".encode("utf-8"), {}
 
         client._post = fake_post
-        client.synthesize("zh_male_baqiqingshu_mars_bigtts", "测试")
-        client.synthesize("zh_female_vv_uranus_bigtts", "测试")
+        client.synthesize("S_test_voice", "（压低声音）现在，听我说。")
 
-        self.assertEqual(resources, ["seed-tts-1.0", "seed-tts-2.0"])
+        self.assertEqual(captured["text"], '<cot text="压低声音">现在，听我说。</cot>')
+        self.assertTrue(json.loads(captured["additions"])["use_tag_parser"])
+
+    def test_removed_preset_voice_ids_are_rejected(self):
+        from doubao_speech import DoubaoSpeechClient, DoubaoSpeechError
+
+        client = DoubaoSpeechClient(api_key="test-key")
+
+        with self.assertRaisesRegex(DoubaoSpeechError, "仅支持声音复刻 2.0"):
+            client.synthesize("zh_male_baqiqingshu_mars_bigtts", "测试")
 
     def test_speech_quota_error_returns_service_unavailable(self):
         import token_server
@@ -202,6 +231,21 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertLess(final_prompt.index("身份背景：身份设定"), final_prompt.index("回答要求："))
         self.assertNotIn("用户记忆", final_prompt)
 
+    def test_character_prompt_requires_stage_directions_for_performative_scenes(self):
+        from token_server import SYSTEM_PROMPTS, build_agent_instructions
+
+        instructions = build_agent_instructions({
+            "name": "测试角色",
+            "persona": "温和但有锋芒。",
+            "language": "zh",
+        })
+
+        self.assertIn("普通事实、知识、步骤问题不要添加括号", instructions)
+        self.assertIn("涉及安慰、告白、调侃、争执", instructions)
+        self.assertIn("添加一处简短的中文全角括号", instructions)
+        self.assertNotIn("用户未要求展开", SYSTEM_PROMPTS["en"])
+        self.assertIn("Response requirements (in priority order):", SYSTEM_PROMPTS["en"])
+
     def test_agent_instructions_accept_sqlite_rows(self):
         import sqlite3
         from token_server import build_agent_instructions
@@ -215,8 +259,8 @@ class SparkChatApiTest(unittest.TestCase):
         instructions = build_agent_instructions(character)
 
         self.assertIn("角色名称：测试角色", instructions)
-        self.assertIn("回答要求：", instructions)
-        self.assertIn("必须只使用自然、准确、简洁的英文回答", instructions)
+        self.assertIn("Response requirements (in priority order):", instructions)
+        self.assertIn("Reply only in natural, accurate, concise English", instructions)
 
     def test_session_cookie_survives_new_client(self):
         self.login()
@@ -355,6 +399,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(payload["tts"]["speaker"], "ICL_uranus_6a6d9cd9d9b89695")
         self.assertEqual(payload["dialog"]["extra"]["model"], "2.1.0.0")
         self.assertEqual(payload["dialog"]["system_role"], "Use English.")
+        self.assertEqual(payload["dialog"]["speaking_style"], "Speak as a controlled commander.")
 
     def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
         from server import session_payload
@@ -369,10 +414,41 @@ class SparkChatApiTest(unittest.TestCase):
         config = realtime_character_config(character)
         payload = session_payload({"speakerId": "S_test_voice", **config})
 
-        self.assertEqual(config["instructions"], build_agent_instructions(character))
+        self.assertEqual(
+            config["instructions"],
+            build_agent_instructions(character),
+        )
         self.assertEqual(config["language"], "en")
         self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
         self.assertIn("机械统帅", payload["dialog"]["character_manifest"])
+        self.assertIn("Stage directions", payload["dialog"]["character_manifest"])
+        self.assertIn("entire response must begin with it", payload["dialog"]["character_manifest"])
+        self.assertIn("Never place it in the middle, at the end", payload["dialog"]["character_manifest"])
+        self.assertTrue(config["instructions"].startswith("Mandatory language rule:"))
+        self.assertTrue(config["instructions"].endswith("even if the user does."))
+        self.assertIn("Speak only English", config["speakingStyle"])
+
+    def test_realtime_and_text_chat_share_core_language_and_character_rules(self):
+        from token_server import build_agent_instructions, realtime_character_config
+
+        character = {
+            "name": "测试角色",
+            "persona": "沉着、可靠。",
+            "voice_id": "S_custom",
+            "language": "zh",
+        }
+        text_instructions = build_agent_instructions(character)
+        realtime_config = realtime_character_config(character)
+
+        for shared_rule in ("角色名称：测试角色", "身份背景：沉着、可靠。", "只用自然、准确、简洁的中文回答"):
+            self.assertIn(shared_rule, text_instructions)
+            self.assertIn(shared_rule, realtime_config["instructions"])
+        self.assertIn("整条回答必须以该括号开头", text_instructions)
+        self.assertIn("整条回答必须以该括号开头", realtime_config["instructions"])
+        self.assertIn("禁止把括号放在台词中间、句末或正文之后", realtime_config["instructions"])
+        self.assertTrue(realtime_config["instructions"].startswith("强制语言规则："))
+        self.assertTrue(realtime_config["instructions"].endswith("绝对不要切换语言。"))
+        self.assertIn("只说中文，不夹杂英文", realtime_config["speakingStyle"])
 
     def test_character_model_is_used_for_text_generation(self):
         import token_server
@@ -409,7 +485,7 @@ class SparkChatApiTest(unittest.TestCase):
         payload = session_payload({"speakerId": "S_custom", **config})
 
         self.assertNotIn("机械统帅", payload["dialog"]["character_manifest"])
-        self.assertIn("必须只使用自然、准确、简洁的中文回答", config["instructions"])
+        self.assertIn("只用自然、准确、简洁的中文回答", config["instructions"])
 
     def test_realtime_voice_mapping_is_independent_from_cloned_tts_voice(self):
         import token_server
@@ -434,8 +510,8 @@ class SparkChatApiTest(unittest.TestCase):
             json={
                 "name": "待修改角色",
                 "persona": "保持自然。",
-                "voiceId": "archive",
-                "voiceName": "方舟档案员",
+                "voiceId": "S_custom_one",
+                "voiceName": "自定义音色一",
             },
         )
         character_id = created.json["character"]["id"]
@@ -444,20 +520,20 @@ class SparkChatApiTest(unittest.TestCase):
             json={
                 "name": "已修改角色",
                 "persona": "回答简洁。",
-                "voiceId": "ironvow",
-                "voiceName": "钢铁誓言",
+                "voiceId": "S_custom_two",
+                "voiceName": "自定义音色二",
                 "avatarUrl": "data:image/jpeg;base64,/9j/4AAQ",
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["character"]["name"], "已修改角色")
-        self.assertEqual(response.json["character"]["voiceId"], "ironvow")
+        self.assertEqual(response.json["character"]["voiceId"], "S_custom_two")
         self.assertEqual(response.json["character"]["avatarUrl"], "data:image/jpeg;base64,/9j/4AAQ")
 
         preset_id = self.client.get("/api/characters").json["characters"][0]["id"]
         overridden = self.client.patch(
             f"/api/characters/{preset_id}",
-            json={"name": "修改预设", "persona": "无", "voiceId": "archive", "voiceName": "方舟档案员", "avatarUrl": "data:image/webp;base64,UFJFU0VU"},
+            json={"name": "修改预设", "persona": "无", "voiceId": "S_custom_one", "voiceName": "自定义音色一", "avatarUrl": "data:image/webp;base64,UFJFU0VU"},
         )
         self.assertEqual(overridden.status_code, 200)
         self.assertEqual(overridden.json["character"]["name"], "修改预设")

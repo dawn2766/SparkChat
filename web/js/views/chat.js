@@ -1,6 +1,7 @@
 import { createIcons, Copy, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
+import { mergeRealtimeText } from "../realtime-text.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
@@ -162,39 +163,51 @@ async function speak(text, button = null) {
 
 async function toggleDictation() {
   const button = document.querySelector("#dictate");
-  if (state.listening) {
-    await state.conversation?.stop();
+  if (!button || button.disabled) return;
+  const setDictationState = (mode) => {
+    const recording = mode === "recording";
+    button.disabled = mode === "starting";
+    button.classList.toggle("recording", recording);
+    button.setAttribute("aria-label", mode === "starting" ? "正在启动语音输入" : recording ? "停止语音输入" : "语音输入");
+  };
+  if (state.conversation) {
+    const conversation = state.conversation;
     state.conversation = null;
     state.listening = false;
-    button.classList.remove("recording");
+    setDictationState("idle");
+    await conversation.stop();
     return;
   }
   try {
     state.listening = true;
-    button.classList.add("recording");
+    setDictationState("starting");
     const textarea = document.querySelector("#composer textarea");
     const initialText = textarea.value;
     let committedText = "";
     state.conversation = await createRealtimeSession(state.active, {
       onTranscript: (data) => {
         if (!data.text) return;
-        textarea.value = initialText + committedText + data.text;
-        if (!data.interim) committedText += data.text;
+        const mergedText = mergeRealtimeText(committedText, data.text);
+        textarea.value = `${initialText}${initialText && mergedText ? " " : ""}${mergedText}`;
+        if (!data.interim) committedText = mergedText;
         resizeComposer(textarea);
       },
       onError: (error) => notify(error.message || "未能识别语音"),
       onClose: () => {
         state.listening = false;
-        button.classList.remove("recording");
+        setDictationState("idle");
         if (state.conversation) state.conversation = null;
       },
     }, { playAudio: false });
     await state.conversation.beginMicrophone();
+    setDictationState("recording");
   } catch (error) {
+    const conversation = state.conversation;
+    state.conversation = null;
+    await conversation?.stop();
     notify(error.message || "无法启动豆包语音识别");
     state.listening = false;
-    button.classList.remove("recording");
-    state.conversation = null;
+    setDictationState("idle");
   }
 }
 

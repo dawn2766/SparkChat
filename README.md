@@ -30,16 +30,16 @@ CLIENT_HOST=127.0.0.1
 COOKIE_SECURE=false
 
 SPARKCHAT_VOICE_MEGADEEP=S_豆包音色ID
-SPARKCHAT_VOICE_IRONVOW=
-SPARKCHAT_VOICE_STARLIGHT=
-SPARKCHAT_VOICE_ARCHIVE=
+SPARKCHAT_REALTIME_VOICE_MEGADEEP=S_豆包音色ID
 ```
 
 文本角色回复使用火山方舟模型列表中的 `doubao-seed-character-260628`，也可以通过 `ARK_MODEL` 指定项目内已开通的同类接入点。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
 
 `DOUBAO_VOICE_DESIGN_SPEAKER_IDS` 是控制台购买的空白 `S_` 音色资源池。每个资源只会分配给一个用户设计音色。声音复刻 V3 状态接口会为 ICL V3 音色返回 `ICL_uranus_...` 实时映射 ID；该 ID 使用 O2.0，`saturn_` 和 SC2.0 实时克隆音色使用 SC2.0。
 
-聊天朗读和端到端实时语音统一使用新版 API Key。Mars/Moon 等预置 1.0 音色使用 `seed-tts-1.0`，Uranus 预置 2.0 音色使用 `seed-tts-2.0`，声音复刻 2.0 使用 `seed-icl-2.0`；实时 WebSocket 资源 ID 固定为 `volc.speech.dialog`。`SPARKCHAT_VOICE_*` 和 `SPARKCHAT_REALTIME_VOICE_*` 可绑定同一个声音复刻 2.0 `S_` 音色 ID。
+聊天朗读和端到端实时语音统一使用新版 API Key。唯一的预置音色是威震天的声音复刻 2.0 音色；用户通过音色设计创建的音色同样使用 `seed-icl-2.0`。实时 WebSocket 资源 ID 固定为 `volc.speech.dialog`，`SPARKCHAT_VOICE_MEGADEEP` 和 `SPARKCHAT_REALTIME_VOICE_MEGADEEP` 可绑定同一个 `S_` 音色 ID。
+
+文本聊天模型可在需要表现情绪、动作或细微表情时，在台词前生成简短括号舞台提示。聊天朗读不会读出提示，声音复刻 2.0 使用 `seed-tts-2.0-expressive` 和 `<cot>` 分段语音标签。端到端实时语音不使用括号协议，只将角色身份、回答规则和 `speaking_style` 发送给实时模型，由模型直接控制语音表现。
 
 若 API 未授权、资源未开通或额度不足，接口返回 `actionUrl`，前端会打开[豆包语音控制台](https://console.volcengine.com/speech/new)供管理员处理。
 

@@ -12,7 +12,7 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from openai import OpenAI
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from doubao_speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL
+from doubao_speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
 load_dotenv(override=True)
 
@@ -50,32 +50,30 @@ MEGATRON_IDENTITY = """你是威震天：塞伯坦人、霸天虎领袖、卡隆
 
 PRESET_VOICES = [
     {"id": "megadeep", "name": "赛博统帅（英文）", "description": "低沉、冷峻、金属质感", "source": "preset"},
-    {"id": "ironvow", "name": "钢铁誓言（中文）", "description": "浑厚、冷峻、叙事感强", "source": "preset"},
-    {"id": "starlight", "name": "星港信使（中文）", "description": "清晰、年轻、温和敏捷", "source": "preset"},
-    {"id": "archive", "name": "方舟档案（中文）", "description": "沉稳、中性、知识感", "source": "preset"},
 ]
 
-SYSTEM_PROMPTS = {
+CORE_SYSTEM_PROMPTS = {
     "zh": """回答要求：
-- 必须只使用自然、准确、简洁的中文回答，即使用户使用其他语言，也不要切换语种。
-- 先直接回应用户当前问题，再在确有帮助时补充一到两点背景；不要重复用户已经说过的内容。
-- 保持角色的价值观、语气和知识边界，但不要为了扮演角色而牺牲可理解性，也不要无端辱骂用户。
-- 用户没有要求展开时，控制在 2 至 5 句；需要步骤时使用清晰短句或编号。
-- 不知道就坦率说明，不虚构共同经历、记忆或现实世界信息。""",
-    "en": """回答要求：
-- 必须只使用自然、准确、简洁的英文回答，即使用户使用其他语言，也不要切换语种。
-- 先直接回应用户当前问题，再在确有帮助时补充一到两点背景；不要重复用户已经说过的内容。
-- 保持角色的价值观、语气和知识边界，但不要为了扮演角色而牺牲可理解性，也不要无端辱骂用户。
-- 用户没有要求展开时，控制在 2 至 5 句；需要步骤时使用清晰短句或编号。
-- 不知道就坦率说明，不虚构共同经历、记忆或现实世界信息。""",
+按以下优先级执行：
+1. 语言：只用自然、准确、简洁的中文回答，不随用户语言切换。
+2. 角色：始终遵循角色的身份、价值观、语气和知识边界；确保内容清楚易懂，不无端辱骂用户。
+3. 内容：先直接回答当前问题。仅在有帮助时补充一至两点必要背景，不复述用户已提供的信息。无法确定时明确说明，不虚构事实、共同经历或记忆。
+4. 篇幅：用户未要求展开时回答 2 至 5 句；步骤类内容使用短句或编号。""",
+    "en": """Response requirements (in priority order):
+1. Language: Reply only in natural, accurate, concise English. Do not switch languages to match the user.
+2. Character: Consistently follow the character's identity, values, voice, and knowledge limits. Keep the response clear and do not insult the user without cause.
+3. Content: Answer the current question directly. Add only one or two necessary background points when useful, and do not repeat information the user already provided. State uncertainty plainly; never invent facts, shared experiences, or memories.
+4. Length: Unless the user asks for detail, respond in 2 to 5 sentences. Use short sentences or numbered lists for steps.""",
+}
+STAGE_DIRECTION_PROMPTS = {
+    "zh": "5. 舞台提示：普通事实、知识、步骤问题不要添加括号。涉及安慰、告白、调侃、争执、紧张、愤怒、悲伤、喜悦、犹豫、动作或细微表情时，可添加一处简短的中文全角括号。只要使用舞台提示，整条回答必须以该括号开头，先写括号内容，再写实际回答，例如“（压低声音，目光沉静）我明白你的顾虑。”；禁止把括号放在台词中间、句末或正文之后。每次回答最多一处；只写当前可感知的表现，不解释设定，不代替正文。",
+    "en": "5. Stage directions: Do not use parentheses in ordinary factual, knowledge, or step-by-step answers. For comfort, confession, teasing, conflict, tension, anger, sadness, joy, hesitation, actions, or subtle expressions, you may add one brief parenthetical stage direction. Whenever one is used, the entire response must begin with it: write the parenthetical first and the actual answer after it, for example, “(lowering his voice, gaze steady) I understand your concern.” Never place it in the middle, at the end, or after the spoken answer. Use at most one per response. Describe only currently perceptible behavior; do not explain lore or replace the response text.",
+}
+SYSTEM_PROMPTS = {
+    language: f"{prompt}\n{STAGE_DIRECTION_PROMPTS[language]}"
+    for language, prompt in CORE_SYSTEM_PROMPTS.items()
 }
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
-
-
-def strip_nonverbal_text(text):
-    cleaned = re.sub(r"（[^（）]*）|\([^()]*\)|\[[^\[\]]*\]|【[^【】]*】", "", text)
-    cleaned = re.sub(r"\*[^*]+\*", "", cleaned)
-    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
 def speech_error_response(error, action):
@@ -143,21 +141,30 @@ def character_instructions(character):
     return "\n\n".join(sections)
 
 
-def build_agent_instructions(character):
+def language_constraint(language):
+    if language == "en":
+        return "Mandatory language rule: Respond entirely in English. Never switch to Chinese or any other language, even if the user does."
+    return "强制语言规则：所有回答必须全部使用中文。即使用户使用英文或其他语言，也绝对不要切换语言。"
+
+
+def build_agent_instructions(character, include_stage_directions=True):
     language = character["language"]
-    return f"{character_instructions(character)}\n\n{SYSTEM_PROMPTS.get(language, SYSTEM_PROMPT)}"
+    prompts = SYSTEM_PROMPTS if include_stage_directions else CORE_SYSTEM_PROMPTS
+    constraint = language_constraint(language)
+    return f"{constraint}\n\n{character_instructions(character)}\n\n{prompts.get(language, prompts['zh'])}\n\n{constraint}"
 
 
 def realtime_character_config(character):
     language = character["language"]
     is_megatron = character["voice_id"] == "megadeep"
+    language_style = "只说中文，不夹杂英文或其他语言。" if language == "zh" else "Speak only English; do not mix in Chinese or any other language."
     return {
         "instructions": build_agent_instructions(character),
         "language": language,
         "speakingStyle": (
-            "使用原创的低沉、冷峻、克制的机械统帅声线。语速从容，收尾坚定，避免喊叫、夸张戏剧化和过度热情。"
+            f"使用原创的低沉、冷峻、克制的机械统帅声线。语速从容，收尾坚定，避免喊叫、夸张戏剧化和过度热情。{language_style}"
             if is_megatron
-            else "自然、清晰地说话，同时保持角色自身的语气。"
+            else f"自然、清晰地说话，同时保持角色自身的语气。{language_style}"
         ),
     }
 
@@ -251,6 +258,17 @@ def init_db():
         database.execute("ALTER TABLE character_overrides ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''")
     if "language" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+    removed_preset_ids = [
+        row["id"]
+        for row in database.execute(
+            "SELECT id FROM characters WHERE is_preset = 1 AND name <> ?",
+            ("威震天",),
+        ).fetchall()
+    ]
+    for character_id in removed_preset_ids:
+        database.execute("DELETE FROM messages WHERE character_id = ?", (character_id,))
+        database.execute("DELETE FROM character_overrides WHERE character_id = ?", (character_id,))
+        database.execute("DELETE FROM characters WHERE id = ?", (character_id,))
     database.execute(
         "INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)",
         ("CaraLin", generate_password_hash("2766")),
@@ -692,11 +710,12 @@ def regenerate_message(character_id, message_id):
 def speak_message(character_id):
     character = get_character(character_id)
     payload = request.get_json(silent=True) or {}
-    text = strip_nonverbal_text(payload.get("text", "").strip())
+    text = payload.get("text", "").strip()
+    spoken_text, _expressive_text, _cues = prepare_speech_text(text)
     if character is None:
         return jsonify(error="未找到该角色"), 404
     voice_id = doubao_speaker_id(character)
-    if not text or len(text) > 5000:
+    if not spoken_text or len(spoken_text) > 5000:
         return jsonify(error="朗读内容需为 1 至 5000 个字符"), 400
     if not doubao_speech.configured:
         return jsonify(error="服务器尚未配置豆包语音", actionUrl=SPEECH_CONSOLE_URL), 503

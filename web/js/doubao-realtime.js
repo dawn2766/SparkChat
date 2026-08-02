@@ -1,5 +1,5 @@
 import { api, apiUrl } from "./api.js";
-import { mergeRealtimeText } from "./realtime-text.js";
+import { completeSubtitleSentence, mergeRealtimeText } from "./realtime-text.js";
 
 function pcm16FromFloat32(samples) {
   const pcm = new ArrayBuffer(samples.length * 2);
@@ -48,8 +48,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let processor;
   let closed = false;
   let playbackTimer = 0;
-  let assistantTurnText = "";
+  let assistantChatText = "";
+  let assistantSpokenText = "";
   let assistantQuestionId = "";
+  let assistantReplyId = "";
   const playbackNodes = new Set();
 
   const reportPlaybackState = () => {
@@ -121,16 +123,24 @@ export async function createRealtimeSession(character, handlers = {}, options = 
       }
       if (message.event === 350 || message.event === 550) {
         const questionId = String(data.question_id || "");
-        if (questionId && questionId !== assistantQuestionId) {
+        const replyId = String(data.reply_id || "");
+        if ((questionId && questionId !== assistantQuestionId) || (replyId && replyId !== assistantReplyId)) {
           assistantQuestionId = questionId;
-          assistantTurnText = "";
+          assistantReplyId = replyId;
+          assistantChatText = "";
+          assistantSpokenText = "";
         }
         const text = assistantText(data);
-        if (text) {
-          const mergedText = mergeRealtimeText(assistantTurnText, text);
-          if (mergedText !== assistantTurnText) {
-            assistantTurnText = mergedText;
-            handlers.onText?.(assistantTurnText);
+        if (message.event === 550 && text) {
+          assistantChatText = mergeRealtimeText(assistantChatText, text);
+          if (!assistantSpokenText) handlers.onText?.(assistantChatText);
+        }
+        if (message.event === 350 && text) {
+          const sentence = completeSubtitleSentence(text, config.language);
+          const mergedText = mergeRealtimeText(assistantSpokenText, sentence);
+          if (mergedText !== assistantSpokenText) {
+            assistantSpokenText = mergedText;
+            handlers.onText?.(assistantSpokenText);
           }
         }
       }
@@ -154,6 +164,9 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   });
 
   const beginMicrophone = async () => {
+    if (closed) throw Error("语音会话已结束");
+    if (!navigator.mediaDevices?.getUserMedia) throw Error("当前浏览器不支持麦克风输入");
+    await audioContext.resume();
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
     source = audioContext.createMediaStreamSource(mediaStream);
     processor = audioContext.createScriptProcessor(1024, 1, 1);
@@ -174,7 +187,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
       pendingSamples = combined.slice(offset);
     };
     source.connect(processor);
-    processor.connect(audioContext.destination);
+    const silentGain = audioContext.createGain();
+    silentGain.gain.value = 0;
+    processor.connect(silentGain);
+    silentGain.connect(audioContext.destination);
   };
 
   return { beginMicrophone, stop, mute: (muted) => mediaStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; }) };

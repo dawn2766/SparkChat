@@ -1,15 +1,51 @@
 import base64
+import html
 import json
 import os
+import re
 import uuid
 from urllib import error, request
 
 
 SPEECH_CONSOLE_URL = "https://console.volcengine.com/speech/new"
-TTS_1_RESOURCE_ID = "seed-tts-1.0"
-TTS_2_RESOURCE_ID = "seed-tts-2.0"
 VOICE_CLONE_RESOURCE_ID = "seed-icl-2.0"
-VOICE_CLONE_MODEL = "seed-tts-2.0-standard"
+VOICE_CLONE_MODEL = "seed-tts-2.0-expressive"
+
+
+STAGE_DIRECTION_PATTERN = re.compile(
+    r"（([^（）]*)）|\(([^()]*)\)|\[([^\[\]]*)\]|【([^【】]*)】|\*([^*]+)\*"
+)
+
+
+def prepare_speech_text(text):
+    cues = []
+    segments = []
+    cursor = 0
+    active_cue = ""
+    for match in STAGE_DIRECTION_PATTERN.finditer(text):
+        spoken = text[cursor:match.start()]
+        if spoken.strip():
+            segments.append((active_cue, spoken))
+        cue = next((value.strip() for value in match.groups() if value and value.strip()), "")
+        if cue:
+            cues.append(cue)
+            active_cue = cue
+        cursor = match.end()
+    if cursor < len(text) and text[cursor:].strip():
+        segments.append((active_cue, text[cursor:]))
+
+    plain_text = re.sub(r"[ \t]{2,}", " ", "".join(spoken for _, spoken in segments)).strip()
+    expressive_parts = []
+    for cue, spoken in segments:
+        if not spoken:
+            continue
+        escaped_spoken = html.escape(spoken, quote=False)
+        if cue:
+            escaped_cue = html.escape(cue[:80], quote=True)
+            expressive_parts.append(f"<cot text=\"{escaped_cue}\">{escaped_spoken}</cot>")
+        else:
+            expressive_parts.append(escaped_spoken)
+    return plain_text, "".join(expressive_parts).strip(), cues[:8]
 
 
 class DoubaoSpeechError(RuntimeError):
@@ -90,31 +126,30 @@ class DoubaoSpeechClient:
         return result
 
     def synthesize(self, speaker_id, text, language="zh"):
-        is_cloned_voice = speaker_id.startswith(("S_", "ICL_", "saturn_"))
-        if is_cloned_voice:
-            resource_id = VOICE_CLONE_RESOURCE_ID
-        elif "_uranus_" in speaker_id:
-            resource_id = TTS_2_RESOURCE_ID
-        else:
-            resource_id = TTS_1_RESOURCE_ID
+        plain_text, expressive_text, cues = prepare_speech_text(text)
+        if not plain_text:
+            raise DoubaoSpeechError("语音内容不包含可朗读文本", status_code=400)
+        if not speaker_id.startswith(("S_", "ICL_", "saturn_")):
+            raise DoubaoSpeechError("当前仅支持声音复刻 2.0 音色", status_code=400)
         body, headers = self._post(
             "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
             {
                 "user": {"uid": "sparkchat"},
                 "namespace": "BidirectionalTTS",
                 "req_params": {
-                    "text": text,
+                    "text": expressive_text if cues else plain_text,
                     "speaker": speaker_id,
                     "language": language,
-                    **({"model": VOICE_CLONE_MODEL} if is_cloned_voice else {}),
+                    "model": VOICE_CLONE_MODEL,
                     "audio_params": {
                         "format": "mp3",
                         "sample_rate": 24000,
-                        "speech_rate": -8 if is_cloned_voice else 0,
+                        "speech_rate": -8,
                     },
+                    **({"additions": json.dumps({"use_tag_parser": True})} if cues else {}),
                 },
             },
-            resource_id=resource_id,
+            resource_id=VOICE_CLONE_RESOURCE_ID,
         )
         audio_parts = []
         for line in body.decode("utf-8").splitlines():
