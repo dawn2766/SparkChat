@@ -219,12 +219,16 @@ async function toggleDictation() {
 async function sendMessage(event) {
   event.preventDefault();
   if (state.sending) return;
+  state.sending = true;
+  await stopVoiceInteraction();
   const form = event.currentTarget;
   const textarea = form.content;
   const sendButton = form.querySelector(".send");
   const content = textarea.value.trim();
-  if (!content) return;
-  state.sending = true;
+  if (!content) {
+    state.sending = false;
+    return;
+  }
   textarea.value = "";
   resizeComposer(textarea);
   textarea.disabled = true;

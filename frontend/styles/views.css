@@ -350,6 +350,51 @@
   box-shadow: var(--shadow);
 }
 
+.app-dialog::backdrop {
+  background: rgb(0 0 0 / 72%);
+  backdrop-filter: blur(5px);
+}
+
+.dialog-panel {
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dialog-header,
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 17px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-header h2 {
+  margin: 5px 0 0;
+  font-size: 18px;
+}
+
+.dialog-body {
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.dialog-body .field label {
+  margin-bottom: 7px;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.dialog-actions .primary-button,
+.dialog-actions .secondary-button {
+  min-width: 100px;
 }
 
 .text-area.compact {
