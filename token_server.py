@@ -199,10 +199,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             owner_id INTEGER,
             name TEXT NOT NULL,
-            tagline TEXT NOT NULL DEFAULT '',
             persona TEXT NOT NULL,
-            background TEXT NOT NULL DEFAULT '',
-            memory TEXT NOT NULL DEFAULT '',
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
             language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
@@ -215,10 +212,7 @@ def init_db():
             user_id INTEGER NOT NULL,
             character_id INTEGER NOT NULL,
             name TEXT NOT NULL,
-            tagline TEXT NOT NULL DEFAULT '',
             persona TEXT NOT NULL,
-            background TEXT NOT NULL DEFAULT '',
-            memory TEXT NOT NULL DEFAULT '',
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
             language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
@@ -234,7 +228,6 @@ def init_db():
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            read_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
         );
@@ -672,7 +665,7 @@ def chat(character_id):
 
     database = get_db()
     database.execute(
-        "INSERT INTO messages (user_id, character_id, role, content, read_at) VALUES (?, ?, 'user', ?, CURRENT_TIMESTAMP)",
+        "INSERT INTO messages (user_id, character_id, role, content) VALUES (?, ?, 'user', ?)",
         (session["user_id"], character_id, content),
     )
     history = database.execute(
