@@ -39,16 +39,8 @@
     grid-template-columns: 1fr;
   }
 
-  .studio-launch {
-    width: 100%;
-  }
-
   .field-wide {
     grid-column: auto;
-  }
-
-  .studio-actions {
-    grid-template-columns: 1fr;
   }
 
   .auth-view {

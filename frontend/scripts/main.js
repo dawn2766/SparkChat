@@ -14,6 +14,10 @@ async function loadHome() {
   renderHome({ bindShell, openChat: openCharacter });
 }
 
+async function loadProfile() {
+  renderProfile({ bindShell, onLogout: () => renderAuth("", loadHome) });
+}
+
 async function openCharacter(id) {
   await openChat(id, loadHome);
 }
@@ -24,7 +28,7 @@ function bindShell() {
       stopVoiceInteraction();
       if (tab.dataset.tab === "home") renderHome({ bindShell, openChat: openCharacter });
       if (tab.dataset.tab === "create") renderCreate({ bindShell, onCreated: loadHome });
-      if (tab.dataset.tab === "profile") renderProfile({ bindShell, onLogout: () => renderAuth("", loadHome) });
+      if (tab.dataset.tab === "profile") loadProfile();
     };
   });
 }

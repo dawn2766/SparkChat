@@ -150,6 +150,8 @@ async function speak(text, button = null) {
       const data = await response.json().catch(() => ({}));
       throw Error(data.error || "语音生成失败");
     }
+    const contentType = response.headers.get("Content-Type") || "";
+    if (!contentType.startsWith("audio/")) throw Error("语音服务返回了无效音频格式");
     speechUrl = URL.createObjectURL(await response.blob());
     speechAudio = new Audio(speechUrl);
     speechAudio.onended = stopSpeechAudio;
@@ -157,7 +159,10 @@ async function speak(text, button = null) {
     await speechAudio.play();
   } catch (error) {
     if (speechButton === button) stopSpeechAudio();
-    if (error.name !== "AbortError") notify(error.message);
+    if (error.name !== "AbortError") {
+      if (error.name === "NotAllowedError") notify("浏览器阻止了音频播放，请再次点击朗读按钮");
+      else notify(error.message);
+    }
   }
 }
 

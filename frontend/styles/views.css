@@ -338,12 +338,6 @@
   border-color: var(--accent);
 }
 
-.studio-launch {
-  min-height: 44px;
-  align-self: end;
-  white-space: nowrap;
-}
-
 .app-dialog {
   width: min(92vw, 540px);
   max-height: min(88vh, 720px);
@@ -356,58 +350,6 @@
   box-shadow: var(--shadow);
 }
 
-.app-dialog::backdrop {
-  background: rgb(0 0 0 / 72%);
-  backdrop-filter: blur(5px);
-}
-
-.dialog-panel {
-  max-height: min(88vh, 720px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.dialog-header,
-.dialog-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 17px 18px;
-  border-bottom: 1px solid var(--line);
-}
-
-.dialog-header h2 {
-  margin: 5px 0 0;
-  font-size: 18px;
-}
-
-.dialog-body {
-  overflow-y: auto;
-  padding: 18px;
-}
-
-.dialog-body .field label {
-  margin-bottom: 7px;
-}
-
-.dialog-intro {
-  margin: 0 0 17px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.dialog-actions {
-  justify-content: flex-end;
-  border-top: 1px solid var(--line);
-  border-bottom: 0;
-}
-
-.dialog-actions .primary-button,
-.dialog-actions .secondary-button {
-  min-width: 100px;
 }
 
 .text-area.compact {
@@ -470,22 +412,6 @@
   line-height: 1.5;
 }
 
-.voice-source {
-  display: inline-block;
-  margin-top: 8px;
-  color: var(--faint);
-  font: 8px var(--font-mono);
-  text-transform: uppercase;
-}
-
-.voice-studio {
-  margin-top: 13px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, rgb(216 243 93 / 5%), transparent 48%),
-    var(--surface);
 }
 
 .studio-head {
@@ -551,6 +477,38 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+}
+
+.profile-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--faint);
+  font: 9px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.profile-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: left;
+}
+
+.profile-link strong,
+.profile-link small {
+  display: block;
+}
+
+.profile-link small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .profile-section {

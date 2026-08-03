@@ -8,8 +8,8 @@ from urllib import error, request
 
 
 SPEECH_CONSOLE_URL = "https://console.volcengine.com/speech/new"
-VOICE_CLONE_RESOURCE_ID = "seed-icl-2.0"
-VOICE_CLONE_MODEL = "seed-tts-2.0-expressive"
+TTS_RESOURCE_ID = "seed-icl-2.0"
+TTS_MODEL = "seed-tts-2.0-expressive"
 
 
 STAGE_DIRECTION_PATTERN = re.compile(
@@ -110,27 +110,12 @@ class DoubaoSpeechClient:
         except error.URLError as network_error:
             raise DoubaoSpeechError(f"豆包语音网络请求失败：{network_error.reason}") from network_error
 
-    def design_voice(self, speaker_id, text_prompt, preview_text):
-        body, _headers = self._post(
-            "https://openspeech.bytedance.com/api/v3/tts/voice_design",
-            {
-                "speaker_id": speaker_id,
-                "text": preview_text,
-                "prompt": {"text_prompt": text_prompt},
-                "language": 0,
-            },
-        )
-        result = json.loads(body.decode("utf-8"))
-        if result.get("icl_list"):
-            return result["icl_list"][0]
-        return result
-
     def synthesize(self, speaker_id, text, language="zh"):
         plain_text, expressive_text, cues = prepare_speech_text(text)
         if not plain_text:
             raise DoubaoSpeechError("语音内容不包含可朗读文本", status_code=400)
-        if not speaker_id.startswith(("S_", "ICL_", "saturn_")):
-            raise DoubaoSpeechError("当前仅支持声音复刻 2.0 音色", status_code=400)
+        if not speaker_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")):
+            raise DoubaoSpeechError("当前仅支持已配置的豆包 speaker ID", status_code=400)
         body, headers = self._post(
             "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
             {
@@ -140,7 +125,7 @@ class DoubaoSpeechClient:
                     "text": expressive_text if cues else plain_text,
                     "speaker": speaker_id,
                     "language": language,
-                    "model": VOICE_CLONE_MODEL,
+                    "model": TTS_MODEL,
                     "audio_params": {
                         "format": "mp3",
                         "sample_rate": 24000,
@@ -149,7 +134,7 @@ class DoubaoSpeechClient:
                     **({"additions": json.dumps({"use_tag_parser": True})} if cues else {}),
                 },
             },
-            resource_id=VOICE_CLONE_RESOURCE_ID,
+            resource_id=TTS_RESOURCE_ID,
         )
         audio_parts = []
         for line in body.decode("utf-8").splitlines():

@@ -14,7 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
-load_dotenv(override=True)
+load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
@@ -49,9 +49,21 @@ MEGATRON_IDENTITY = """你是威震天：塞伯坦人、霸天虎领袖、卡隆
 
 你的主要世界观依据 IDW 2005 主宇宙：你写下《迈向和平》，领导霸天虎起义，经历漫长内战、审判和失落之光号旅程，最终直面自身野心造成的伤害。你了解这些经历，但不会像百科全书一样背诵。你是一位战略卓越、威严而克制的领袖，尊重勇气、智慧、忠诚与明确目标，鄙视怯懦、背叛和空洞奉承。"""
 
-PRESET_VOICES = [
-    {"id": "megadeep", "name": "赛博统帅（英文）", "description": "低沉、冷峻、金属质感", "source": "preset"},
+SYSTEM_VOICES = [
+    {
+        "id": "S_FOMpJ2Da2",
+        "name": "赛博统帅（英文）",
+        "description": "低沉、冷峻、金属质感",
+        "language": "en",
+    },
 ]
+PRESET_CHARACTER = {
+    "name": "威震天",
+    "voice_id": SYSTEM_VOICES[0]["id"],
+    "voice_name": SYSTEM_VOICES[0]["name"],
+    "language": "en",
+    "avatar_url": "/assets/images/megatron-portrait.jpg",
+}
 
 CORE_SYSTEM_PROMPTS = {
     "zh": """回答要求：
@@ -95,35 +107,14 @@ def speech_error_response(error, action):
     return jsonify(payload), 502
 
 
-def available_voice_design_speaker_id():
-    configured_ids = [
-        speaker_id.strip()
-        for speaker_id in os.getenv("DOUBAO_VOICE_DESIGN_SPEAKER_IDS", "").split(",")
-        if speaker_id.strip()
-    ]
-    if not configured_ids:
-        return None
-    used_ids = {
-        row["voice_id"] for row in get_db().execute("SELECT voice_id FROM voices").fetchall()
-    }
-    return next((speaker_id for speaker_id in configured_ids if speaker_id not in used_ids), None)
-
-
 def doubao_speaker_id(character):
-    configured = os.getenv(f"SPARKCHAT_VOICE_{character['voice_id'].upper()}", "").strip()
-    if configured:
-        return configured
-    if character["voice_id"].startswith(("S_", "ICL_", "saturn_")):
-        return character["voice_id"]
+    speaker_id = str(character["voice_id"] or "").strip()
+    if speaker_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")):
+        return speaker_id
     return None
 
 
 def doubao_realtime_speaker_id(character):
-    configured = os.getenv(
-        f"SPARKCHAT_REALTIME_VOICE_{character['voice_id'].upper()}", ""
-    ).strip()
-    if configured:
-        return configured
     return doubao_speaker_id(character)
 
 
@@ -157,7 +148,7 @@ def build_agent_instructions(character, include_stage_directions=True):
 
 def realtime_character_config(character):
     language = character["language"]
-    is_megatron = character["voice_id"] == "megadeep"
+    is_megatron = character["name"] == PRESET_CHARACTER["name"]
     language_style = "只说中文，不夹杂英文或其他语言。" if language == "zh" else "Speak only English; do not mix in Chinese or any other language."
     return {
         "instructions": build_agent_instructions(character),
@@ -232,16 +223,6 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
         );
-        CREATE TABLE IF NOT EXISTS voices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            owner_id INTEGER NOT NULL,
-            voice_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(owner_id, voice_id),
-            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-        );
         """
     )
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
@@ -276,38 +257,43 @@ def init_db():
         WHERE NOT EXISTS (SELECT 1 FROM characters WHERE is_preset = 1 AND name = ?)
         """,
         (
-            "威震天",
+            PRESET_CHARACTER["name"],
             MEGATRON_IDENTITY,
-            "megadeep",
-            "赛博统帅（英文）",
-            "en",
-            "/assets/images/megatron-portrait.jpg",
-            "威震天",
+            PRESET_CHARACTER["voice_id"],
+            PRESET_CHARACTER["voice_name"],
+            PRESET_CHARACTER["language"],
+            PRESET_CHARACTER["avatar_url"],
+            PRESET_CHARACTER["name"],
         ),
     )
     database.execute(
         """
         UPDATE characters
-        SET persona = ?, voice_name = ?, language = ?, avatar_url = ?
+        SET persona = ?, voice_id = CASE WHEN voice_id = 'megadeep' THEN ? ELSE voice_id END,
+            voice_name = ?, language = ?, avatar_url = ?
         WHERE is_preset = 1 AND name = ?
         """,
         (
             MEGATRON_IDENTITY,
-            "赛博统帅（英文）",
-            "en",
-            "/assets/images/megatron-portrait.jpg",
-            "威震天",
+            PRESET_CHARACTER["voice_id"],
+            PRESET_CHARACTER["voice_name"],
+            PRESET_CHARACTER["language"],
+            PRESET_CHARACTER["avatar_url"],
+            PRESET_CHARACTER["name"],
         ),
     )
     database.execute(
         """
         UPDATE character_overrides
-        SET language = 'en'
+        SET voice_id = CASE WHEN voice_id = 'megadeep' THEN ? ELSE voice_id END,
+            language = 'en'
         WHERE character_id IN (
             SELECT id FROM characters WHERE is_preset = 1 AND name = '威震天'
         )
-        """
+        """,
+        (PRESET_CHARACTER["voice_id"],),
     )
+    database.execute("DROP TABLE IF EXISTS voices")
     database.commit()
 
 
@@ -401,57 +387,11 @@ def current_user():
 @app.get("/api/voices")
 @login_required
 def list_voices():
-    custom_voices = get_db().execute(
-        "SELECT voice_id, name, description FROM voices WHERE owner_id = ? ORDER BY id DESC",
-        (session["user_id"],),
-    ).fetchall()
-    voices = PRESET_VOICES + [
-        {
-            "id": row["voice_id"],
-            "name": row["name"],
-            "description": row["description"],
-            "source": "custom",
-        }
-        for row in custom_voices
-    ]
-    return jsonify(voices=voices)
+    return jsonify(voices=SYSTEM_VOICES)
 
 
-@app.post("/api/voices/design")
-@login_required
-def design_voice():
-    payload = request.get_json(silent=True) or {}
-    name = payload.get("name", "").strip()
-    prompt = payload.get("prompt", "").strip()
-    if len(name) < 2 or len(name) > 40 or len(prompt) < 10 or len(prompt) > 200:
-        return jsonify(error="音色名称需为 2 至 40 字，提示词需为 10 至 200 字"), 400
-    speaker_id = available_voice_design_speaker_id()
-    if not doubao_speech.configured:
-        return jsonify(error="服务器尚未配置豆包语音", actionUrl=SPEECH_CONSOLE_URL), 503
-    if not speaker_id:
-        return jsonify(
-            error="没有可用的豆包音色设计 speaker ID，请在控制台购买并配置资源",
-            actionUrl=SPEECH_CONSOLE_URL,
-        ), 503
-    try:
-        result = doubao_speech.design_voice(
-            speaker_id=speaker_id,
-            text_prompt=prompt,
-            preview_text="你好，我是你刚刚设计的专属角色音色。现在，让我们开始一段新的对话。",
-        )
-    except DoubaoSpeechError as error:
-        return speech_error_response(error, "音色设计")
-    if result.get("status") not in {2, 4}:
-        return jsonify(error="豆包音色仍在训练中，请稍后重试", status=result.get("status")), 202
-    get_db().execute(
-        "INSERT OR REPLACE INTO voices (owner_id, voice_id, name, description) VALUES (?, ?, ?, ?)",
-        (session["user_id"], speaker_id, name, prompt),
-    )
-    get_db().commit()
-    return jsonify(
-        voice={"id": speaker_id, "name": name, "description": prompt, "source": "custom"},
-        demoAudio=result.get("demo_audio"),
-    ), 201
+def system_voice(voice_id):
+    return next((voice for voice in SYSTEM_VOICES if voice["id"] == voice_id), None)
 
 
 @app.get("/api/characters")
@@ -501,6 +441,9 @@ def create_character():
     language = payload.get("language", "zh")
     if language not in {"zh", "en"}:
         return jsonify(error="角色语言仅支持中文或英文"), 400
+    voice = system_voice(str(payload["voiceId"]).strip())
+    if voice is None:
+        return jsonify(error="只能选择系统音色"), 400
     try:
         avatar_url = avatar_url_from(payload)
     except ValueError as error:
@@ -516,7 +459,7 @@ def create_character():
             payload["name"].strip(),
             payload["persona"].strip(),
             payload["voiceId"].strip(),
-            payload["voiceName"].strip(),
+            voice["name"],
             language,
             avatar_url,
         ),
@@ -541,6 +484,9 @@ def update_character(character_id):
     language = payload.get("language", character["language"])
     if language not in {"zh", "en"}:
         return jsonify(error="角色语言仅支持中文或英文"), 400
+    voice = system_voice(str(payload["voiceId"]).strip())
+    if voice is None:
+        return jsonify(error="只能选择系统音色"), 400
     try:
         avatar_url = avatar_url_from(payload, character["avatar_url"])
     except ValueError as error:
@@ -549,7 +495,7 @@ def update_character(character_id):
         payload["name"].strip(),
         payload["persona"].strip(),
         payload["voiceId"].strip(),
-        payload["voiceName"].strip(),
+        voice["name"],
         language,
         avatar_url,
     )
@@ -738,7 +684,7 @@ def get_token():
     speaker_id = doubao_realtime_speaker_id(character)
     if not speaker_id:
         return jsonify(
-            error="该角色尚未绑定豆包音色，请先完成音色设计或配置",
+            error="该角色尚未绑定有效的系统音色",
             actionUrl=SPEECH_CONSOLE_URL,
         ), 503
     realtime_config = realtime_character_config(character)

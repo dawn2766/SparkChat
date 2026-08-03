@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -19,10 +20,18 @@ from .realtime_protocol import (
     encode_event,
 )
 
-load_dotenv(override=True)
+load_dotenv()
 
 DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 logger = logging.getLogger("sparkchat.realtime")
+
+
+async def send_browser(browser, message):
+    try:
+        await browser.send(message)
+        return True
+    except websockets.exceptions.ConnectionClosed:
+        return False
 
 
 def upstream_headers():
@@ -32,7 +41,6 @@ def upstream_headers():
     return {
         "X-Api-Key": api_key,
         "X-Api-Resource-Id": os.getenv("DOUBAO_REALTIME_RESOURCE_ID", "volc.speech.dialog"),
-        "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
         "X-Api-Connect-Id": str(uuid.uuid4()),
     }
 
@@ -43,7 +51,7 @@ def session_payload(config):
     instructions = config["instructions"]
     speaking_style = config.get("speakingStyle", "自然、清晰地说话，同时保持角色自身的语气。")
     is_o2_clone = speaker_id.startswith("ICL_uranus_")
-    is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_")) and not is_o2_clone
+    is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")) and not is_o2_clone
     payload = {
         "asr": {
             "audio_info": {"format": "pcm", "sample_rate": 16000, "channel": 1},
@@ -76,19 +84,23 @@ async def forward_upstream(upstream, browser):
         async for data in upstream:
             event = decode_event(data)
             if event["message_type"] == AUDIO_ONLY_RESPONSE:
-                await browser.send(event["payload"])
+                if not await send_browser(browser, event["payload"]):
+                    return
                 continue
             payload = event["payload"] if isinstance(event["payload"], dict) else {}
-            await browser.send(json.dumps({
+            if not await send_browser(browser, json.dumps({
                 "type": "event",
                 "event": event["event"],
                 "data": payload,
-            }, ensure_ascii=False))
+            }, ensure_ascii=False)):
+                return
     except asyncio.CancelledError:
         raise
+    except websockets.exceptions.ConnectionClosed:
+        return
     except Exception as error:
         logger.exception("Realtime voice session failed")
-        await browser.send(json.dumps({
+        await send_browser(browser, json.dumps({
             "type": "error",
             "message": f"豆包实时语音上游连接异常：{error}",
         }, ensure_ascii=False))
@@ -112,7 +124,8 @@ async def handle_browser(browser):
             session_event = decode_event(await upstream.recv())
             if session_event["event"] != 150:
                 raise RuntimeError(session_event.get("payload") or "豆包实时会话启动失败")
-            await browser.send(json.dumps({"type": "ready"}))
+            if not await send_browser(browser, json.dumps({"type": "ready"})):
+                return
             upstream_task = asyncio.create_task(forward_upstream(upstream, browser))
             try:
                 async for message in browser:
@@ -124,10 +137,14 @@ async def handle_browser(browser):
                         break
             finally:
                 upstream_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await upstream_task
                 await upstream.send(encode_event(FINISH_SESSION, {}, session_id))
                 await upstream.send(encode_event(FINISH_CONNECTION, {}))
+    except websockets.exceptions.ConnectionClosed:
+        return
     except Exception as error:
-        await browser.send(json.dumps({
+        await send_browser(browser, json.dumps({
             "type": "error",
             "message": str(error),
             "actionUrl": "https://console.volcengine.com/speech/new",
