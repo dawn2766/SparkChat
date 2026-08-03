@@ -11,6 +11,8 @@ let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
 let speechButton = null;
+let dictationGeneration = 0;
+let pendingDictationConversation = null;
 
 function stopSpeechAudio() {
   speechRequest?.abort();
@@ -38,12 +40,28 @@ function updateSpeechButton(button, playing) {
 }
 
 export async function stopVoiceInteraction() {
+  dictationGeneration += 1;
   stopSpeechAudio();
   const conversation = state.conversation;
+  const pendingConversation = pendingDictationConversation;
   state.conversation = null;
+  pendingDictationConversation = null;
   state.listening = false;
-  await conversation?.stop();
+  setDictationState("idle");
+  await Promise.all([
+    conversation?.stop(),
+    pendingConversation && pendingConversation !== conversation ? pendingConversation.stop() : null,
+  ]);
   document.querySelector(".phone-overlay")?.remove();
+}
+
+function setDictationState(mode) {
+  const button = document.querySelector("#dictate");
+  if (!button) return;
+  const recording = mode === "recording";
+  button.disabled = mode === "starting";
+  button.classList.toggle("recording", recording);
+  button.setAttribute("aria-label", mode === "starting" ? "正在启动语音输入" : recording ? "停止语音输入" : "语音输入");
 }
 
 function resizeComposer(textarea) {
@@ -169,13 +187,8 @@ async function speak(text, button = null) {
 async function toggleDictation() {
   const button = document.querySelector("#dictate");
   if (!button || button.disabled) return;
-  const setDictationState = (mode) => {
-    const recording = mode === "recording";
-    button.disabled = mode === "starting";
-    button.classList.toggle("recording", recording);
-    button.setAttribute("aria-label", mode === "starting" ? "正在启动语音输入" : recording ? "停止语音输入" : "语音输入");
-  };
   if (state.conversation) {
+    dictationGeneration += 1;
     const conversation = state.conversation;
     state.conversation = null;
     state.listening = false;
@@ -183,14 +196,16 @@ async function toggleDictation() {
     await conversation.stop();
     return;
   }
+  const generation = ++dictationGeneration;
   try {
     state.listening = true;
     setDictationState("starting");
     const textarea = document.querySelector("#composer textarea");
     const initialText = textarea.value;
     let committedText = "";
-    state.conversation = await createRealtimeSession(state.active, {
+    const conversation = await createRealtimeSession(state.active, {
       onTranscript: (data) => {
+        if (generation !== dictationGeneration) return;
         if (!data.text) return;
         const mergedText = mergeRealtimeText(committedText, data.text);
         textarea.value = `${initialText}${initialText && mergedText ? " " : ""}${mergedText}`;
@@ -199,16 +214,32 @@ async function toggleDictation() {
       },
       onError: (error) => notify(error.message || "未能识别语音"),
       onClose: () => {
+        if (generation !== dictationGeneration) return;
         state.listening = false;
         setDictationState("idle");
-        if (state.conversation) state.conversation = null;
+        if (state.conversation === conversation) state.conversation = null;
       },
     }, { playAudio: false });
-    await state.conversation.beginMicrophone();
+    pendingDictationConversation = conversation;
+    if (generation !== dictationGeneration) {
+      await conversation.stop();
+      if (pendingDictationConversation === conversation) pendingDictationConversation = null;
+      return;
+    }
+    state.conversation = conversation;
+    await conversation.beginMicrophone();
+    if (generation !== dictationGeneration || state.conversation !== conversation) {
+      await conversation.stop();
+      if (pendingDictationConversation === conversation) pendingDictationConversation = null;
+      return;
+    }
+    pendingDictationConversation = null;
     setDictationState("recording");
   } catch (error) {
+    if (generation !== dictationGeneration) return;
     const conversation = state.conversation;
     state.conversation = null;
+    pendingDictationConversation = null;
     await conversation?.stop();
     notify(error.message || "无法启动豆包语音识别");
     state.listening = false;
@@ -219,11 +250,11 @@ async function toggleDictation() {
 async function sendMessage(event) {
   event.preventDefault();
   if (state.sending) return;
-  state.sending = true;
-  await stopVoiceInteraction();
   const form = event.currentTarget;
   const textarea = form.content;
   const sendButton = form.querySelector(".send");
+  state.sending = true;
+  await stopVoiceInteraction();
   const content = textarea.value.trim();
   if (!content) {
     state.sending = false;
