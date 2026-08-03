@@ -75,7 +75,7 @@ SparkChat 是面向手机 WebView 的变形金刚主题数字角色对话应用�
 ### 自动化
 
 ```powershell
-python -m unittest -v test_app.py
+python -m unittest -v tests.test_app
 ```
 
 必须覆盖：登录、预置角色、会话 Cookie、角色私有性、角色编辑、预置角色覆盖、退出、提示词构造和自定义角色实时引擎隔离。

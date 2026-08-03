@@ -10,7 +10,7 @@ class SparkChatApiTest(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         os.environ["DATABASE_PATH"] = str(Path(cls.temp_dir.name) / "sparkchat.db")
         os.environ["FLASK_SECRET_KEY"] = "test-secret-key"
-        from token_server import app
+        from backend.app import app
 
         cls.app = app
         cls.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
@@ -34,10 +34,33 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["characters"][0]["name"], "威震天")
         self.assertTrue(response.json["characters"][0]["isPreset"])
+        self.assertEqual(
+            response.json["characters"][0]["avatarUrl"],
+            "/assets/images/megatron-portrait.jpg",
+        )
         self.assertNotIn("unreadCount", response.json["characters"][0])
 
+    def test_pwa_manifest_uses_relative_scope(self):
+        response = self.client.get("/manifest.webmanifest")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content_type, "application/manifest+json")
+        manifest = response.get_json()
+        self.assertEqual(manifest["start_url"], "./")
+        self.assertEqual(manifest["scope"], "./")
+        self.assertEqual(manifest["display"], "standalone")
+        response.close()
+
+    def test_service_worker_is_not_persistently_cached(self):
+        response = self.client.get("/service-worker.js")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-cache")
+        self.assertEqual(response.headers["Service-Worker-Allowed"], "/")
+        response.close()
+
     def test_old_preset_characters_are_removed_during_migration(self):
-        from token_server import get_db, init_db
+        from backend.app import get_db, init_db
 
         with self.app.app_context():
             database = get_db()
@@ -54,7 +77,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIsNone(old_character)
 
     def test_stage_directions_are_preserved_as_speech_cues(self):
-        from doubao_speech import prepare_speech_text
+        from backend.speech import prepare_speech_text
 
         plain_text, expressive_text, cues = prepare_speech_text(
             "（低声）准备行动。[金属碰撞声] *抬手* 现在出发。"
@@ -68,7 +91,7 @@ class SparkChatApiTest(unittest.TestCase):
     def test_cloned_voice_uses_v3_voice_clone_2_model_and_api_key(self):
         import base64
         import json
-        from doubao_speech import DoubaoSpeechClient
+        from backend.speech import DoubaoSpeechClient
 
         captured = {}
         client = DoubaoSpeechClient(api_key="test-key")
@@ -96,7 +119,7 @@ class SparkChatApiTest(unittest.TestCase):
     def test_cloned_voice_uses_stage_direction_cot(self):
         import base64
         import json
-        from doubao_speech import DoubaoSpeechClient
+        from backend.speech import DoubaoSpeechClient
 
         captured = {}
         client = DoubaoSpeechClient(api_key="test-key")
@@ -113,7 +136,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertTrue(json.loads(captured["additions"])["use_tag_parser"])
 
     def test_removed_preset_voice_ids_are_rejected(self):
-        from doubao_speech import DoubaoSpeechClient, DoubaoSpeechError
+        from backend.speech import DoubaoSpeechClient, DoubaoSpeechError
 
         client = DoubaoSpeechClient(api_key="test-key")
 
@@ -121,8 +144,8 @@ class SparkChatApiTest(unittest.TestCase):
             client.synthesize("zh_male_baqiqingshu_mars_bigtts", "测试")
 
     def test_speech_quota_error_returns_service_unavailable(self):
-        import token_server
-        from doubao_speech import DoubaoSpeechError
+        from backend import app as token_server
+        from backend.speech import DoubaoSpeechError
 
         class FakeDoubaoSpeech:
             configured = True
@@ -151,8 +174,8 @@ class SparkChatApiTest(unittest.TestCase):
                 os.environ["SPARKCHAT_VOICE_MEGADEEP"] = original_voice
 
     def test_speech_authorization_error_returns_console_link(self):
-        import token_server
-        from doubao_speech import DoubaoSpeechError
+        from backend import app as token_server
+        from backend.speech import DoubaoSpeechError
 
         class UnauthorizedDoubaoSpeech:
             configured = True
@@ -181,8 +204,8 @@ class SparkChatApiTest(unittest.TestCase):
                 os.environ["SPARKCHAT_VOICE_MEGADEEP"] = original_voice
 
     def test_sse_api_key_error_returns_console_link(self):
-        import token_server
-        from doubao_speech import DoubaoSpeechError
+        from backend import app as token_server
+        from backend.speech import DoubaoSpeechError
 
         class InvalidKeySpeech:
             configured = True
@@ -211,7 +234,7 @@ class SparkChatApiTest(unittest.TestCase):
                 os.environ["SPARKCHAT_VOICE_MEGADEEP"] = original_voice
 
     def test_character_prompt_contains_only_character_context(self):
-        from token_server import SYSTEM_PROMPT, build_agent_instructions, character_instructions
+        from backend.app import SYSTEM_PROMPT, build_agent_instructions, character_instructions
 
         prompt = character_instructions({
             "name": "测试角色",
@@ -232,7 +255,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertNotIn("用户记忆", final_prompt)
 
     def test_character_prompt_requires_stage_directions_for_performative_scenes(self):
-        from token_server import SYSTEM_PROMPTS, build_agent_instructions
+        from backend.app import SYSTEM_PROMPTS, build_agent_instructions
 
         instructions = build_agent_instructions({
             "name": "测试角色",
@@ -248,7 +271,7 @@ class SparkChatApiTest(unittest.TestCase):
 
     def test_agent_instructions_accept_sqlite_rows(self):
         import sqlite3
-        from token_server import build_agent_instructions
+        from backend.app import build_agent_instructions
 
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
@@ -298,7 +321,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/characters").status_code, 401)
 
     def test_custom_character_can_use_doubao_realtime_voice(self):
-        import token_server
+        from backend import app as token_server
 
         self.login()
         response = self.client.post(
@@ -341,7 +364,7 @@ class SparkChatApiTest(unittest.TestCase):
                 os.environ["SPARKCHAT_REALTIME_VOICE_S_TEST_CUSTOM"] = original_realtime_voice
 
     def test_https_token_never_returns_insecure_local_websocket_url(self):
-        import token_server
+        from backend import app as token_server
 
         original_app_id = os.environ.get("DOUBAO_SPEECH_APP_ID")
         original_access_key = os.environ.get("DOUBAO_SPEECH_ACCESS_KEY")
@@ -374,7 +397,7 @@ class SparkChatApiTest(unittest.TestCase):
                     os.environ[name] = value
 
     def test_cloned_voice_realtime_session_uses_sc2_model(self):
-        from server import session_payload
+        from backend.realtime_server import session_payload
 
         payload = session_payload({
             "speakerId": "S_test_voice",
@@ -387,7 +410,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(payload["dialog"]["extra"]["model"], "2.2.0.0")
 
     def test_realtime_icl_v3_voice_uses_o2_session_payload(self):
-        from server import session_payload
+        from backend.realtime_server import session_payload
 
         payload = session_payload({
             "speakerId": "ICL_uranus_6a6d9cd9d9b89695",
@@ -402,8 +425,8 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(payload["dialog"]["speaking_style"], "Speak as a controlled commander.")
 
     def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
-        from server import session_payload
-        from token_server import build_agent_instructions, realtime_character_config
+        from backend.realtime_server import session_payload
+        from backend.app import build_agent_instructions, realtime_character_config
 
         character = {
             "name": "Megatron",
@@ -429,7 +452,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("Speak only English", config["speakingStyle"])
 
     def test_realtime_and_text_chat_share_core_language_and_character_rules(self):
-        from token_server import build_agent_instructions, realtime_character_config
+        from backend.app import build_agent_instructions, realtime_character_config
 
         character = {
             "name": "测试角色",
@@ -451,7 +474,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("只说中文，不夹杂英文", realtime_config["speakingStyle"])
 
     def test_character_model_is_used_for_text_generation(self):
-        import token_server
+        from backend import app as token_server
 
         captured = {}
 
@@ -472,8 +495,8 @@ class SparkChatApiTest(unittest.TestCase):
             token_server.ark.responses = original_responses
 
     def test_custom_cloned_voice_does_not_get_megatron_delivery(self):
-        from server import session_payload
-        from token_server import realtime_character_config
+        from backend.realtime_server import session_payload
+        from backend.app import realtime_character_config
 
         character = {
             "name": "Custom",
@@ -488,7 +511,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("只用自然、准确、简洁的中文回答", config["instructions"])
 
     def test_realtime_voice_mapping_is_independent_from_cloned_tts_voice(self):
-        import token_server
+        from backend import app as token_server
 
         original_voice = os.environ.get("SPARKCHAT_REALTIME_VOICE_MEGADEEP")
         try:

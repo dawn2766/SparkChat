@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { completeSubtitleSentence, mergeRealtimeText } from "./realtime-text.js";
+import { completeSubtitleSentence, mergeRealtimeText } from "../../frontend/scripts/realtime-text.js";
 
 assert.equal(mergeRealtimeText("", "State your purpose."), "State your purpose.");
 assert.equal(

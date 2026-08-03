@@ -1,10 +1,10 @@
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
 
 .env
 data/
 *.log
 *.pem
 server_config.txt
-威震天头像.jpg

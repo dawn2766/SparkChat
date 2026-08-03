@@ -1,6 +1,35 @@
-# SparkChat voice agent
+# SparkChat PWA
 
-SparkChat 是面向手机 WebView 的数字角色对话应用，包含账号与角色管理、流式文本聊天、豆包音色设计、语音识别、语音合成和端到端实时语音对话。
+SparkChat 是面向移动设备的可安装数字角色对话 PWA，包含账号与角色管理、流式文本聊天、豆包音色设计、语音识别、语音合成和端到端实时语音对话。应用壳支持离线打开，联网 API、SSE 和实时语音始终直连服务端，不进入离线缓存。
+
+## 项目结构
+
+```text
+SparkChat/
+├── backend/                 # 后端应用与豆包服务模块
+│   ├── app.py               # Flask API 与 Web 入口
+│   ├── speech.py            # 豆包语音合成封装
+│   ├── realtime_server.py   # 实时语音代理实现
+│   ├── realtime_protocol.py # 实时语音协议编解码
+│   ├── web.py               # Flask / WSGI 入口
+│   └── realtime.py          # 实时语音命令入口
+├── frontend/                # 无构建步骤的原生 ES Modules PWA
+│   ├── assets/              # 图标与图片
+│   ├── scripts/             # 状态、API、视图和语音模块
+│   ├── styles/              # 分层样式
+│   ├── index.html
+│   ├── manifest.webmanifest
+│   └── service-worker.js
+├── data/                    # 本地 SQLite 数据（不提交）
+├── docs/                    # 需求和验收文档
+├── tests/                   # 后端与前端测试
+├── .env.example             # 环境变量模板
+├── requirements.txt         # Python 依赖
+├── start.ps1                # Windows 一键启动
+└── README.md                # 项目说明
+```
+
+根目录只保留项目元数据、启动脚本和文档；业务源码统一位于 `backend/` 和 `frontend/`。
 
 ## 安装
 
@@ -48,13 +77,13 @@ SPARKCHAT_REALTIME_VOICE_MEGADEEP=S_豆包音色ID
 打开两个终端：
 
 ```powershell
-python server.py
+python -m backend.realtime
 ```
 
 文本 Web 服务和实时语音代理需要同时运行。实时代理使用 `SPEECH_ENGINE_PORT`，公网 Nginx 应将 `DOUBAO_REALTIME_PUBLIC_WS` 对应路径转发到该端口。
 
 ```powershell
-python token_server.py
+python -m backend.app
 ```
 
 也可以执行：
@@ -70,13 +99,13 @@ Web 服务默认位于 <http://127.0.0.1:3002/>，豆包实时代理监听 `127.
 Web 服务使用 Gunicorn：
 
 ```bash
-gunicorn --workers 2 --threads 4 --bind 127.0.0.1:3002 token_server:app
+gunicorn --workers 2 --threads 4 --bind 127.0.0.1:3002 backend.web:app
 ```
 
 实时代理独立运行：
 
 ```bash
-python server.py
+python -m backend.realtime
 ```
 
 Nginx 需要同时代理 Web 和 WebSocket。实时路径必须与 `DOUBAO_REALTIME_PUBLIC_WS` 一致：
@@ -110,9 +139,12 @@ location /sparkchat/realtime {
 ## 验证
 
 ```powershell
-python -m unittest -v test_app.py
-Get-Content web/js/doubao-realtime.js | node --input-type=module --check
-Get-Content web/js/views/chat.js | node --input-type=module --check
+python -m unittest -v tests.test_app
+node tests/frontend/doubao-realtime.test.mjs
+Get-Content frontend/scripts/main.js | node --input-type=module --check
+Get-Content frontend/service-worker.js | node --input-type=module --check
 ```
+
+PWA 安装与 service worker 仅在 HTTPS 或 `localhost` 安全上下文中启用。部署在 `/sparkchat/` 等子路径时，清单、API 和离线回退会沿当前应用路径解析。
 
 真实服务器验收需逐项检查登录、文本聊天、音色设计、朗读、听写、实时通话建连、字幕、音频播放、静音和挂断，并记录响应头 `X-Tt-Logid`。当前工作区没有 `SparkChat-Server` 的 SSH 或发布凭证时，本地测试不能替代真实豆包授权与公网链路验收。

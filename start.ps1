@@ -42,11 +42,11 @@ Stop-PortProcess $speechPort
 Stop-PortProcess $clientPort
 
 Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
-    "-NoExit", "-Command", "& '$python' server.py"
+    "-NoExit", "-Command", "& '$python' -m backend.realtime"
 )
 
 Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
-    "-NoExit", "-Command", "& '$python' token_server.py"
+    "-NoExit", "-Command", "& '$python' -m backend.app"
 )
 
 Write-Host "SparkChat 已启动" -ForegroundColor Green
