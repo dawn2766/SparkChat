@@ -12,8 +12,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 13px;
-  margin-bottom: 42px;
+  gap: 12px;
+  margin-bottom: 60px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 800;
@@ -43,7 +43,7 @@
 }
 
 .auth-heading p {
-  margin: 9px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 13px;
 }
