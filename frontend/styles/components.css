@@ -209,6 +209,10 @@
   text-transform: uppercase;
 }
 
+.field label {
+  margin-bottom: 7px;
+}
+
 .field-note,
 .char-count {
   color: var(--faint);

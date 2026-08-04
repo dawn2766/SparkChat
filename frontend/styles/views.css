@@ -378,10 +378,6 @@
   padding: 18px;
 }
 
-.dialog-body .field label {
-  margin-bottom: 7px;
-}
-
 .dialog-actions {
   justify-content: flex-end;
   border-top: 1px solid var(--line);
@@ -768,6 +764,7 @@
   align-items: center;
   gap: 7px;
   flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 .user-password-form {
@@ -848,7 +845,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 12px 15px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--line);
   background: rgb(16 19 19 / 90%);
   backdrop-filter: blur(16px);
@@ -886,6 +883,13 @@
   width: 18px;
   height: 18px;
   stroke-width: 2.2;
+}
+
+.chat-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .messages {

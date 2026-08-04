@@ -1,4 +1,4 @@
-import { createIcons, Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
@@ -6,7 +6,7 @@ import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
-const refreshIcons = () => createIcons({ icons: { Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } });
+const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -84,18 +84,21 @@ function updateComposerState(textarea) {
   sendButton.disabled = state.sending || !hasContent;
 }
 
-function messageActionsMarkup(message, isAssistant) {
+function messageActionsMarkup(message, isAssistant, canRegenerate = false) {
   if (!isAssistant) return "";
-  return `<span class="message-actions"><button class="message-action" data-copy aria-label="复制这条回复"><i data-lucide="copy"></i></button><button class="message-action translate-button" data-translate="${message.id || ""}" aria-label="翻译这条回复"><i data-lucide="languages"></i></button><button class="message-action" data-regenerate="${message.id || ""}" aria-label="重新生成这条回复"><i data-lucide="refresh-cw"></i></button><button class="speak-button" data-speak aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
+  const regenerateButton = canRegenerate
+    ? `<button class="message-action" data-regenerate="${message.id || ""}" aria-label="重新生成这条回复"><i data-lucide="refresh-cw"></i></button>`
+    : "";
+  return `<span class="message-actions"><button class="message-action" data-copy aria-label="复制这条回复"><i data-lucide="copy"></i></button><button class="message-action translate-button" data-translate="${message.id || ""}" aria-label="翻译这条回复"><i data-lucide="languages"></i></button>${regenerateButton}<button class="speak-button" data-speak aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
 }
 
-function assistantStampMarkup(message, character) {
-  return `<span class="stamp">${messageActionsMarkup(message, true)}</span>`;
+function assistantStampMarkup(message, character, canRegenerate = false) {
+  return `<span class="stamp">${messageActionsMarkup(message, true, canRegenerate)}</span>`;
 }
 
-function messageMarkup(message, character) {
+function messageMarkup(message, character, canRegenerate = false) {
   const isAssistant = message.role === "assistant";
-  const stamp = isAssistant ? assistantStampMarkup(message, character) : messageActionsMarkup(message, false);
+  const stamp = isAssistant ? assistantStampMarkup(message, character, canRegenerate) : messageActionsMarkup(message, false);
   const bubble = isAssistant
     ? `<div class="bubble">${esc(message.content)}</div>`
     : `<button class="bubble user-bubble" type="button" data-edit-user-message aria-label="编辑并重新发送这条消息">${esc(message.content)}</button>`;
@@ -392,7 +395,8 @@ async function sendMessage(event) {
     state.messages.push({ id: result.messageId, role: "assistant", content: result.answer });
     assistant.classList.remove("pending");
     assistant.dataset.messageId = result.messageId;
-    assistant.querySelector(".stamp").outerHTML = assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active);
+    container.querySelectorAll("[data-regenerate]").forEach((button) => button.remove());
+    assistant.querySelector(".stamp").outerHTML = assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active, true);
     bindSpeechButtons();
   } catch (error) {
     assistant.classList.remove("pending");
@@ -735,8 +739,9 @@ export async function openChat(id, onBack) {
 
 export function renderChat({ onBack }) {
   const character = state.active;
-  const messages = state.messages.map((message) => messageMarkup(message, character)).join("");
-  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人">‹</button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong><span>${esc(state.activeConversation?.title || "新对话")}</span></div><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></header><div class="messages" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
+  const latestAssistantIndex = state.messages.reduce((latest, message, index) => message.role === "assistant" ? index : latest, -1);
+  const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex)).join("");
+  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong><span>${esc(state.activeConversation?.title || "新对话")}</span></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
   document.querySelector("#back").onclick = async () => {
     await stopVoiceInteraction();
     onBack();

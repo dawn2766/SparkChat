@@ -81,16 +81,11 @@
   }
 
   .user-admin-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .user-admin-actions {
-    width: 100%;
+    gap: 8px;
   }
 
   .user-admin-actions .compact-button {
-    flex: 1;
+    flex: 0 0 auto;
   }
 
   .user-password-form > div {
