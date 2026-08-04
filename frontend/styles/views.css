@@ -725,13 +725,6 @@
   max-height: none;
 }
 
-.role-editor-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .admin-manager-body {
   min-height: 0;
   flex: 1;
@@ -814,15 +807,6 @@
   padding: 22px;
   overflow-y: auto;
   scrollbar-width: none;
-}
-
-.role-editor-heading {
-  margin-bottom: 18px;
-}
-
-.role-editor-heading h3 {
-  margin: 0;
-  font-size: 20px;
 }
 
 .role-persona-input {
