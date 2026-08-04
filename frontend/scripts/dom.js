@@ -15,6 +15,27 @@ export function notify(text) {
   notify.timer = window.setTimeout(() => toast.classList.add("hidden"), 2600);
 }
 
+export function confirmDeletion({ title = "确认删除", name, message = "删除后将无法恢复。" }) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "app-dialog confirm-dialog";
+  dialog.innerHTML = `<form method="dialog" class="dialog-panel"><header class="dialog-header"><h2>${esc(title)}</h2><button class="icon-button" type="submit" value="cancel" aria-label="关闭确认弹窗">×</button></header><div class="dialog-body"><p class="confirm-dialog-message">确定要删除“<strong>${esc(name)}</strong>”吗？${esc(message)}</p></div><footer class="dialog-actions"><button class="secondary-button" type="submit" value="cancel">取消</button><button class="danger-button" type="submit" value="confirm">确认删除</button></footer></form>`;
+  document.body.append(dialog);
+  dialog.showModal();
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    dialog.close("cancel");
+  });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close("cancel");
+  });
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      resolve(dialog.returnValue === "confirm");
+      dialog.remove();
+    }, { once: true });
+  });
+}
+
 export function avatar(character, small = false) {
   const name = character?.name || "?";
   const image = character?.avatarUrl ? `<img src="${esc(character.avatarUrl)}" alt="">` : esc(name.slice(0, 1));

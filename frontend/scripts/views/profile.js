@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { app, avatar, esc, notify, shell } from "../dom.js";
+import { app, avatar, confirmDeletion, esc, notify, shell } from "../dom.js";
 import { state } from "../state.js";
 
 function userRowsMarkup(users) {
@@ -10,13 +10,6 @@ async function bindUserManager(dialog) {
   const body = dialog.querySelector("[data-user-list]");
   const result = await api("/api/admin/users");
   body.innerHTML = userRowsMarkup(result.users);
-  const resetDeleteConfirmations = (except = null) => {
-    body.querySelectorAll('[data-delete-user][data-confirm="true"]').forEach((button) => {
-      if (button === except) return;
-      button.dataset.confirm = "false";
-      button.textContent = "删除";
-    });
-  };
   body.querySelectorAll("[data-reset-password]").forEach((button) => {
     button.onclick = () => {
       const row = button.closest("[data-user-id]");
@@ -38,21 +31,18 @@ async function bindUserManager(dialog) {
   body.querySelectorAll("[data-delete-user]").forEach((button) => {
     button.onclick = async (event) => {
       event.stopPropagation();
-      resetDeleteConfirmations(button);
-      if (button.dataset.confirm !== "true") {
-        button.dataset.confirm = "true";
-        button.textContent = "确认删除";
-        return;
-      }
+      const row = button.closest("[data-user-id]");
+      const username = row.querySelector(".user-admin-identity strong").textContent;
+      if (!await confirmDeletion({ title: "删除用户", name: username, message: "该用户账号及相关数据将被删除，且无法恢复。" })) return;
+      button.disabled = true;
       try {
-        await api(`/api/admin/users/${button.closest("[data-user-id]").dataset.userId}`, { method: "DELETE" });
+        await api(`/api/admin/users/${row.dataset.userId}`, { method: "DELETE" });
         notify("用户已删除");
         await bindUserManager(dialog);
-      } catch (error) { notify(error.message); }
+      } catch (error) { notify(error.message); button.disabled = false; }
     };
   });
   dialog.onclick = (event) => {
-    resetDeleteConfirmations();
     if (event.target === dialog) dialog.close();
   };
 }

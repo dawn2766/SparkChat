@@ -3,7 +3,7 @@ import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
-import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
+import { app, avatar, confirmDeletion, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
 const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } });
@@ -463,18 +463,9 @@ function bindSettings(onBack) {
   };
   dialog.querySelectorAll("[data-dialog-close]").forEach((button) => { button.onclick = cancelSettings; });
   const deleteButton = dialog.querySelector("[data-delete-character]");
-  const resetDeleteConfirmation = () => {
-    if (!deleteButton || deleteButton.disabled) return;
-    deleteButton.dataset.confirm = "false";
-    deleteButton.textContent = "删除角色";
-  };
   if (deleteButton) {
     deleteButton.onclick = async () => {
-      if (deleteButton.dataset.confirm !== "true") {
-        deleteButton.dataset.confirm = "true";
-        deleteButton.textContent = "确认删除";
-        return;
-      }
+      if (!await confirmDeletion({ title: "删除角色", name: state.active.name, message: "角色及其聊天记录都将被删除，且无法恢复。" })) return;
       deleteButton.disabled = true;
       try {
         await api(`/api/characters/${state.active.id}`, { method: "DELETE" });
@@ -485,13 +476,10 @@ function bindSettings(onBack) {
       } catch (error) {
         notify(error.message);
         deleteButton.disabled = false;
-        deleteButton.dataset.confirm = "false";
-        deleteButton.textContent = "删除角色";
       }
     };
   }
   dialog.onclick = (event) => {
-    if (!event.target.closest("[data-delete-character]")) resetDeleteConfirmation();
     if (event.target === dialog) cancelSettings();
   };
   dialog.oncancel = (event) => {
@@ -684,6 +672,7 @@ function renderHistoryBody(dialog) {
     button.onclick = async () => {
       const conversation = state.conversations.find((item) => item.id === Number(button.dataset.deleteConversation));
       if (!conversation) return;
+      if (!await confirmDeletion({ title: "删除对话", name: conversation.title, message: "这段对话及其消息记录将被删除，且无法恢复。" })) return;
       try {
         await api(`/api/characters/${state.active.id}/conversations/${conversation.id}`, { method: "DELETE" });
         state.conversations = state.conversations.filter((item) => item.id !== conversation.id);

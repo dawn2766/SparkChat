@@ -389,6 +389,30 @@
   min-width: 100px;
 }
 
+.confirm-dialog {
+  width: min(92vw, 380px);
+}
+
+.confirm-dialog .dialog-header h2 {
+  margin: 0;
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.confirm-dialog-message strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.confirm-dialog .dialog-actions button {
+  min-width: 96px;
+}
+
 .history-dialog {
   width: min(100% - 24px, 520px);
   max-height: min(78vh, 620px);
