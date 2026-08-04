@@ -12,7 +12,7 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from openai import OpenAI
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .realtime_server import REALTIME_SPEAKING_STYLE
+from .realtime_server import REALTIME_SPEAKING_STYLES, normalize_prompt_language
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
 load_dotenv()
@@ -101,6 +101,10 @@ SYSTEM_PROMPTS = {
     for language, prompt in CORE_SYSTEM_PROMPTS.items()
 }
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
+CHARACTER_PROMPT_LABELS = {
+    "zh": {"name": "角色名称", "persona": "身份背景"},
+    "en": {"name": "Character name", "persona": "Identity and background"},
+}
 
 
 def speech_error_response(error, action):
@@ -139,33 +143,36 @@ def realtime_websocket_url():
         return "/sparkchat/realtime"
     return configured_url
 
-def character_instructions(character):
+def character_instructions(character, language=None):
+    language = normalize_prompt_language(language or character.get("language"))
+    labels = CHARACTER_PROMPT_LABELS[language]
     sections = [
-        f"角色名称：{character['name']}",
-        f"身份背景：{character['persona']}",
+        f"{labels['name']}: {character['name']}",
+        f"{labels['persona']}: {character['persona']}",
     ]
     return "\n\n".join(sections)
 
 
 def language_constraint(language):
+    language = normalize_prompt_language(language)
     if language == "en":
         return "Mandatory language rule: Respond in English and never switch to another language to match your conversation partner. Preserve non-English proper nouns, quotations, abbreviations, or code only when accuracy requires it."
     return "强制语言规则：使用中文回答，不因对话者改用其他语言而切换回答语言。仅在准确表达确有需要时保留外文专有名词、引用、缩写或代码。"
 
 
 def build_agent_instructions(character, include_stage_directions=True):
-    language = character["language"]
+    language = normalize_prompt_language(character["language"])
     prompts = SYSTEM_PROMPTS if include_stage_directions else CORE_SYSTEM_PROMPTS
     constraint = language_constraint(language)
-    return f"{constraint}\n\n{character_instructions(character)}\n\n{prompts.get(language, prompts['zh'])}"
+    return f"{constraint}\n\n{character_instructions(character, language)}\n\n{prompts[language]}"
 
 
 def realtime_character_config(character):
-    language = character["language"]
+    language = normalize_prompt_language(character["language"])
     return {
         "instructions": build_agent_instructions(character, include_stage_directions=False),
         "language": language,
-        "speakingStyle": REALTIME_SPEAKING_STYLE,
+        "speakingStyle": REALTIME_SPEAKING_STYLES[language],
     }
 
 

@@ -23,8 +23,16 @@ from .realtime_protocol import (
 load_dotenv()
 
 DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
-REALTIME_SPEAKING_STYLE = "Speak like a natural, attentive person in a real conversation: clear and expressive, with varied pacing, pauses, emphasis, warmth, and restraint. Respond to your conversation partner's emotional tone without sounding scripted, theatrical, or overly enthusiastic. Let the character's identity shape word choice and attitude through the system instructions, but keep this vocal style consistent for every character."
+REALTIME_SPEAKING_STYLES = {
+    "zh": "请以自然、富有表现力的方式说话，贴合对话中的情绪变化，避免像照稿朗读或刻意进行舞台表演。",
+    "en": "Speak naturally and expressively, matching the conversation's emotional tone without sounding scripted or theatrical.",
+}
+SPEAKING_STYLE_LABELS = {"zh": "说话方式", "en": "Speaking style"}
 logger = logging.getLogger("sparkchat.realtime")
+
+
+def normalize_prompt_language(language):
+    return "en" if language == "en" else "zh"
 
 
 async def send_browser(browser, message):
@@ -48,9 +56,9 @@ def upstream_headers():
 
 def session_payload(config):
     speaker_id = config["speakerId"]
-    language = config.get("language", "")
+    language = normalize_prompt_language(config.get("language"))
     instructions = config["instructions"]
-    speaking_style = config.get("speakingStyle", REALTIME_SPEAKING_STYLE)
+    speaking_style = config.get("speakingStyle", REALTIME_SPEAKING_STYLES[language])
     is_o2_clone = speaker_id.startswith("ICL_uranus_")
     is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")) and not is_o2_clone
     payload = {
@@ -63,11 +71,10 @@ def session_payload(config):
             "audio_config": {"channel": 1, "format": "pcm_s16le", "sample_rate": 24000},
         },
     }
-    if language:
-        payload["tts"]["extra"] = {"explicit_language": language}
+    payload["tts"]["extra"] = {"explicit_language": language}
     if is_sc2_voice:
         payload["dialog"] = {
-            "character_manifest": f"{instructions}\n\n说话方式：{speaking_style}",
+            "character_manifest": f"{instructions}\n\n{SPEAKING_STYLE_LABELS[language]}: {speaking_style}",
             "extra": {"model": "2.2.0.0", "input_mod": "keep_alive"},
         }
     else:
