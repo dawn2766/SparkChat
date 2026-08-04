@@ -600,7 +600,7 @@ class SparkChatApiTest(unittest.TestCase):
             self.assertFalse(first.json["cached"])
             self.assertTrue(second.json["cached"])
             self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0]["model"], "doubao-seed-2-1-pro-260615")
+            self.assertEqual(calls[0]["model"], "doubao-seed-2-1-pro-260628")
             self.assertIn("只输出目标回复的完整译文", calls[0]["instructions"])
         finally:
             token_server.ark.responses = original_responses
