@@ -11,6 +11,10 @@
   .chat-view {
     height: 100vh;
   }
+
+  .messages {
+    padding-inline: 24px;
+  }
 }
 
 @media (max-width: 430px) {
@@ -44,15 +48,16 @@
   }
 
   .auth-view {
-    padding: 22px 18px;
+    min-height: 100dvh;
+    padding: max(22px, env(safe-area-inset-top)) 18px max(22px, env(safe-area-inset-bottom));
   }
 
   .auth-content h1 {
-    font-size: 32px;
+    font-size: 34px;
   }
 
   .message {
-    max-width: 90%;
+    max-width: 88%;
   }
 
   .app-dialog {
@@ -64,7 +69,41 @@
   }
 
   .avatar-field {
-    grid-template-columns: 58px minmax(0, 1fr) auto;
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .avatar-choose {
+    grid-column: 1 / -1;
+  }
+
+  .bottom-nav {
+    height: calc(66px + env(safe-area-inset-bottom));
+  }
+
+  .view {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+
+  .chat-view {
+    height: 100dvh;
+  }
+
+  .chat-header {
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .message-action,
+  .speak-button {
+    width: 30px;
+    height: 28px;
+  }
+
+  .composer {
+    grid-template-columns: 46px minmax(0, 1fr) 46px;
+  }
+
+  .composer.send-hidden {
+    grid-template-columns: 46px minmax(0, 1fr) 0;
   }
 
 }

@@ -1,23 +1,27 @@
 :root {
-  --bg: #0d1010;
-  --surface: #141818;
-  --surface-raised: #1a2020;
-  --surface-soft: #202727;
-  --ink: #f2f5f0;
-  --muted: #8d9893;
-  --faint: #626d68;
-  --line: #2a3230;
-  --line-strong: #3b4643;
+  --bg: #101313;
+  --surface: #171b1b;
+  --surface-raised: #1d2321;
+  --surface-soft: #252c29;
+  --ink: #f5f6ef;
+  --muted: #a4ada7;
+  --faint: #737d77;
+  --line: #2d3733;
+  --line-strong: #46524c;
   --accent: #d8f35d;
-  --accent-strong: #c7e744;
-  --accent-ink: #11150f;
-  --warning: #ff8a65;
-  --danger: #f06862;
-  --success: #75d59a;
-  --shadow: 0 22px 70px rgb(0 0 0 / 36%);
-  --radius: 6px;
-  --font-ui: "Manrope", "Microsoft YaHei", sans-serif;
-  --font-mono: "DM Mono", monospace;
+  --accent-strong: #e3fa72;
+  --accent-ink: #10150f;
+  --warning: #ff9278;
+  --danger: #ff8179;
+  --success: #86dfab;
+  --shadow: 0 24px 80px rgb(0 0 0 / 42%);
+  --radius: 8px;
+  --font-ui: "Space Grotesk", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 20px;
   color-scheme: dark;
   font-family: var(--font-ui);
 }
@@ -59,8 +63,8 @@ body {
   margin: 0;
   color: var(--ink);
   background:
-    linear-gradient(115deg, rgb(216 243 93 / 3%), transparent 28%),
-    repeating-linear-gradient(115deg, rgb(255 255 255 / 1.8%) 0 1px, transparent 1px 18px),
+    radial-gradient(circle at 12% 0%, rgb(216 243 93 / 6%), transparent 28rem),
+    radial-gradient(circle at 100% 100%, rgb(255 146 120 / 4%), transparent 24rem),
     var(--bg);
 }
 
@@ -85,7 +89,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
 button:disabled {
@@ -109,14 +113,14 @@ p {
   margin: 0 auto;
   position: relative;
   overflow: hidden;
-  background: rgb(13 16 16 / 94%);
-  border-inline: 1px solid rgb(255 255 255 / 4%);
+  background: rgb(16 19 19 / 94%);
+  border-inline: 1px solid rgb(255 255 255 / 6%);
 }
 
 .mono-label,
 .eyebrow {
   color: var(--accent);
-  font: 500 10px/1.4 var(--font-mono);
+  font: 500 var(--text-xs)/1.4 var(--font-mono);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
