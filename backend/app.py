@@ -161,8 +161,8 @@ def character_instructions(character, language=None):
 def language_constraint(language):
     language = normalize_prompt_language(language)
     if language == "en":
-        return "Mandatory language rule: Respond in English and never switch to another language to match your conversation partner. Preserve non-English proper nouns, quotations, abbreviations, or code only when accuracy requires it."
-    return "强制语言规则：使用中文回答，不因对话者改用其他语言而切换回答语言。仅在准确表达确有需要时保留外文专有名词、引用、缩写或代码。"
+        return "ENGLISH ONLY. Write every response entirely in English, even when the user writes in Chinese or another language. Do not translate, mirror, or switch languages. Keep non-English names, quotations, abbreviations, code, and URLs only when necessary for accuracy."
+    return "仅使用中文。每次回答都必须完全使用中文，即使对话者使用英文或其他语言。不要翻译、模仿或切换回答语言；仅在准确表达确有需要时保留外文名称、引用、缩写、代码或 URL。"
 
 
 def build_agent_instructions(character, include_stage_directions=True):

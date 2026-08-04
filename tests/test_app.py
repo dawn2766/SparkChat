@@ -341,7 +341,7 @@ class SparkChatApiTest(unittest.TestCase):
             "language": "zh",
         })
         self.assertLess(final_prompt.index("身份背景: 身份设定"), final_prompt.index("回答要求："))
-        self.assertEqual(final_prompt.count("强制语言规则："), 1)
+        self.assertEqual(final_prompt.count("仅使用中文。"), 1)
         self.assertNotIn("用户记忆", final_prompt)
 
     def test_character_prompt_encourages_natural_varied_responses(self):
@@ -382,6 +382,15 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("Form should follow content", SYSTEM_PROMPTS["en"])
         self.assertNotIn("legal, privacy, and safety", SYSTEM_PROMPTS["en"])
 
+        english_instructions = build_agent_instructions({
+            "name": "Test character",
+            "persona": "Calm and direct.",
+            "language": "en",
+        })
+        self.assertTrue(english_instructions.startswith("ENGLISH ONLY."))
+        self.assertIn("even when the user writes in Chinese or another language", english_instructions)
+        self.assertIn("Do not translate, mirror, or switch languages", english_instructions)
+
     def test_agent_instructions_accept_sqlite_rows(self):
         import sqlite3
         from backend.app import build_agent_instructions
@@ -396,7 +405,8 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertIn("Character name: 测试角色", instructions)
         self.assertIn("Response requirements:", instructions)
-        self.assertIn("Respond in English and never switch to another language", instructions)
+        self.assertIn("Write every response entirely in English", instructions)
+        self.assertIn("even when the user writes in Chinese or another language", instructions)
 
     def test_session_cookie_survives_new_client(self):
         self.login()
@@ -554,8 +564,9 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("Speak naturally and expressively", payload["dialog"]["character_manifest"])
         self.assertNotIn("Stage directions", payload["dialog"]["character_manifest"])
         self.assertNotIn("most natural position", payload["dialog"]["character_manifest"])
-        self.assertTrue(config["instructions"].startswith("Mandatory language rule:"))
-        self.assertIn("never switch to another language to match your conversation partner", config["instructions"])
+        self.assertTrue(config["instructions"].startswith("ENGLISH ONLY."))
+        self.assertIn("even when the user writes in Chinese or another language", config["instructions"])
+        self.assertIn("Do not translate, mirror, or switch languages", config["instructions"])
 
     def test_realtime_and_text_chat_share_core_language_and_character_rules(self):
         from backend.app import build_agent_instructions, realtime_character_config
@@ -573,13 +584,13 @@ class SparkChatApiTest(unittest.TestCase):
         for shared_rule in ("角色名称: 测试角色", "身份背景: 沉着、可靠。"):
             self.assertIn(shared_rule, text_instructions)
             self.assertIn(shared_rule, realtime_config["instructions"])
-        self.assertIn("强制语言规则：使用中文回答", text_instructions)
-        self.assertIn("强制语言规则：使用中文回答", realtime_config["instructions"])
+        self.assertIn("仅使用中文。每次回答都必须完全使用中文", text_instructions)
+        self.assertIn("仅使用中文。每次回答都必须完全使用中文", realtime_config["instructions"])
         self.assertIn("可选表现", text_instructions)
         self.assertNotIn("可选表现", realtime_config["instructions"])
         self.assertNotIn("放在对话自然发生的位置", realtime_config["instructions"])
-        self.assertTrue(realtime_config["instructions"].startswith("强制语言规则："))
-        self.assertIn("不因对话者改用其他语言而切换回答语言", realtime_config["instructions"])
+        self.assertTrue(realtime_config["instructions"].startswith("仅使用中文。"))
+        self.assertIn("不要翻译、模仿或切换回答语言", realtime_config["instructions"])
 
         other_character = {**character, "name": "另一个角色", "persona": "活泼、坦率。", "language": "en"}
         self.assertNotEqual(
@@ -592,7 +603,7 @@ class SparkChatApiTest(unittest.TestCase):
         fallback_config = realtime_character_config(fallback_character)
         fallback_payload = session_payload({"speakerId": "S_test_voice", **fallback_config})
         self.assertEqual(fallback_config["language"], "zh")
-        self.assertTrue(fallback_config["instructions"].startswith("强制语言规则："))
+        self.assertTrue(fallback_config["instructions"].startswith("仅使用中文。"))
         self.assertIn("角色名称: 测试角色", fallback_config["instructions"])
         self.assertIn("身份背景: 沉着、可靠。", fallback_config["instructions"])
         self.assertIn("回答要求：", fallback_config["instructions"])
@@ -881,7 +892,7 @@ class SparkChatApiTest(unittest.TestCase):
         payload = session_payload({"speakerId": "S_custom", **config})
 
         self.assertNotIn("机械统帅", payload["dialog"]["character_manifest"])
-        self.assertIn("强制语言规则：使用中文回答", config["instructions"])
+        self.assertIn("仅使用中文。每次回答都必须完全使用中文", config["instructions"])
 
     def test_realtime_and_tts_use_same_character_speaker(self):
         from backend import app as token_server
