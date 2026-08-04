@@ -595,8 +595,6 @@
   line-height: 1.5;
 }
 
-}
-
 .studio-head {
   display: flex;
   align-items: center;
@@ -845,7 +843,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 8px 12px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--line);
   background: rgb(16 19 19 / 90%);
   backdrop-filter: blur(16px);

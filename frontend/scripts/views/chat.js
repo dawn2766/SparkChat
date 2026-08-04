@@ -472,7 +472,7 @@ function bindSettings(onBack) {
     deleteButton.onclick = async () => {
       if (deleteButton.dataset.confirm !== "true") {
         deleteButton.dataset.confirm = "true";
-        deleteButton.textContent = "再次点击确认删除";
+        deleteButton.textContent = "确认删除";
         return;
       }
       deleteButton.disabled = true;
