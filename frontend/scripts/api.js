@@ -19,10 +19,12 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export async function streamChat(characterId, content, onDelta, messageId = null, conversationId = null) {
-  const path = messageId
-    ? `/api/characters/${characterId}/messages/${messageId}/regenerate`
-    : `/api/characters/${characterId}/chat`;
+export async function streamChat(characterId, content, onDelta, messageId = null, conversationId = null, rewrite = false) {
+  const path = rewrite
+    ? `/api/characters/${characterId}/messages/${messageId}/rewrite`
+    : messageId
+      ? `/api/characters/${characterId}/messages/${messageId}/regenerate`
+      : `/api/characters/${characterId}/chat`;
   const response = await fetch(apiUrl(path), {
     method: "POST",
     credentials: "same-origin",
@@ -40,6 +42,7 @@ export async function streamChat(characterId, content, onDelta, messageId = null
   let buffer = "";
   let answer = "";
   let resultMessageId = messageId;
+  let userMessageId = rewrite ? messageId : null;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -53,10 +56,13 @@ export async function streamChat(characterId, content, onDelta, messageId = null
         answer += data.text;
         onDelta(answer);
       }
-      if (data.type === "done") resultMessageId = data.messageId;
+      if (data.type === "done") {
+        resultMessageId = data.messageId;
+        userMessageId = data.userMessageId ?? userMessageId;
+      }
       if (data.type === "error") throw Error(data.message);
     }
   }
   if (!answer.trim()) throw Error("角色没有返回有效内容");
-  return { answer, messageId: resultMessageId };
+  return { answer, messageId: resultMessageId, userMessageId };
 }

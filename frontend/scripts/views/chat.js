@@ -96,7 +96,58 @@ function assistantStampMarkup(message, character) {
 function messageMarkup(message, character) {
   const isAssistant = message.role === "assistant";
   const stamp = isAssistant ? assistantStampMarkup(message, character) : messageActionsMarkup(message, false);
-  return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}" data-original-content="${esc(message.content)}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
+  const bubble = isAssistant
+    ? `<div class="bubble">${esc(message.content)}</div>`
+    : `<button class="bubble user-bubble" type="button" data-edit-user-message aria-label="编辑并重新发送这条消息">${esc(message.content)}</button>`;
+  return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}" data-original-content="${esc(message.content)}"><div class="message-content">${bubble}${stamp}</div></div>`;
+}
+
+async function rewriteUserMessage(message, content) {
+  if (state.sending) return;
+  const messageId = Number(message.dataset.messageId);
+  if (!messageId) {
+    notify("消息仍在保存，请稍后再编辑");
+    return;
+  }
+  state.sending = true;
+  const originalMessages = state.messages.slice();
+  const contentNode = message.querySelector(".message-content");
+  contentNode.innerHTML = `<div class="bubble">${esc(content)}</div><span class="stamp loading-text">正在更新对话…</span>`;
+  try {
+    await streamChat(state.active.id, content, () => {}, messageId, state.activeConversation.id, true);
+    state.messages = (await api(`/api/characters/${state.active.id}/conversations/${state.activeConversation.id}/messages`)).messages;
+    state.conversations = (await api(`/api/characters/${state.active.id}/conversations`)).conversations;
+    state.activeConversation = state.conversations.find((item) => item.id === state.activeConversation.id) || state.activeConversation;
+    notify("聊天历史已更新");
+    renderChat({ onBack: window.__sparkchatBack });
+  } catch (error) {
+    state.messages = originalMessages;
+    notify(error.message);
+    renderChat({ onBack: window.__sparkchatBack });
+  } finally {
+    state.sending = false;
+  }
+}
+
+function beginUserMessageEdit(message) {
+  if (state.sending || message.querySelector(".message-edit-form")) return;
+  const original = message.dataset.originalContent || message.querySelector(".bubble")?.textContent || "";
+  const contentNode = message.querySelector(".message-content");
+  contentNode.innerHTML = `<form class="message-edit-form"><textarea class="text-area" name="content" maxlength="4000" required aria-label="编辑消息"></textarea><div class="message-edit-actions"><button class="secondary-button" type="button" data-cancel-edit>取消</button><button class="primary-button" type="submit">更新并发送</button></div></form>`;
+  const form = contentNode.querySelector("form");
+  form.content.value = original;
+  form.querySelector("[data-cancel-edit]").onclick = () => renderChat({ onBack: window.__sparkchatBack });
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const content = form.content.value.trim();
+    if (!content || content === original) {
+      if (content === original) renderChat({ onBack: window.__sparkchatBack });
+      return;
+    }
+    await rewriteUserMessage(message, content);
+  };
+  form.content.focus();
+  form.content.setSelectionRange(form.content.value.length, form.content.value.length);
 }
 
 function bindSpeechButtons() {
@@ -110,6 +161,11 @@ function bindMessageActions() {
   const container = document.querySelector("#messages");
   if (!container) return;
   container.onclick = async (event) => {
+    const userBubble = event.target.closest("[data-edit-user-message]");
+    if (userBubble) {
+      beginUserMessageEdit(userBubble.closest(".message"));
+      return;
+    }
     const copyButton = event.target.closest("[data-copy]");
     if (copyButton) {
       try {
@@ -314,7 +370,8 @@ async function sendMessage(event) {
   textarea.value = "";
   resizeComposer(textarea);
   updateComposerState(textarea);
-  state.messages.push({ role: "user", content });
+  const userMessage = { role: "user", content };
+  state.messages.push(userMessage);
   const container = document.querySelector("#messages");
   const assistant = document.createElement("div");
   assistant.className = "message pending";
@@ -325,6 +382,9 @@ async function sendMessage(event) {
   scrollMessages();
   try {
     const result = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); }, null, state.activeConversation.id);
+    userMessage.id = result.userMessageId;
+    const userElement = container.querySelector(`.message.user:not([data-message-id]), .message.user[data-message-id=""]`);
+    if (userElement) userElement.dataset.messageId = String(result.userMessageId || "");
     if (state.messages.length === 1 && !state.activeConversation.titleCustom) {
       state.activeConversation.title = content.slice(0, 80);
       document.querySelector(".chat-meta span").textContent = state.activeConversation.title;
@@ -370,7 +430,7 @@ function settingsMarkup(character) {
         <div class="field"><label for="edit-language">回答语言</label><select class="select-input" id="edit-language" name="language"><option value="zh" ${character.language === "zh" ? "selected" : ""}>中文</option><option value="en" ${character.language === "en" ? "selected" : ""}>英文</option></select></div>
         <div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>
       </div>
-      <footer class="dialog-actions"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></footer>
+      <footer class="dialog-actions ${character.isPreset ? "" : "dialog-actions-split"}">${character.isPreset ? "" : '<button type="button" class="danger-button" data-delete-character>删除角色</button>'}<span class="dialog-action-group"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></span></footer>
     </form>
   </dialog>`;
 }
@@ -398,7 +458,38 @@ function bindSettings(onBack) {
     dialog.showModal();
   };
   dialog.querySelectorAll("[data-dialog-close]").forEach((button) => { button.onclick = cancelSettings; });
-  dialog.onclick = (event) => { if (event.target === dialog) cancelSettings(); };
+  const deleteButton = dialog.querySelector("[data-delete-character]");
+  const resetDeleteConfirmation = () => {
+    if (!deleteButton || deleteButton.disabled) return;
+    deleteButton.dataset.confirm = "false";
+    deleteButton.textContent = "删除角色";
+  };
+  if (deleteButton) {
+    deleteButton.onclick = async () => {
+      if (deleteButton.dataset.confirm !== "true") {
+        deleteButton.dataset.confirm = "true";
+        deleteButton.textContent = "再次点击确认删除";
+        return;
+      }
+      deleteButton.disabled = true;
+      try {
+        await api(`/api/characters/${state.active.id}`, { method: "DELETE" });
+        dialog.close();
+        state.characters = state.characters.filter((item) => item.id !== state.active.id);
+        notify("角色及其聊天记录已删除");
+        await onBack();
+      } catch (error) {
+        notify(error.message);
+        deleteButton.disabled = false;
+        deleteButton.dataset.confirm = "false";
+        deleteButton.textContent = "删除角色";
+      }
+    };
+  }
+  dialog.onclick = (event) => {
+    if (!event.target.closest("[data-delete-character]")) resetDeleteConfirmation();
+    if (event.target === dialog) cancelSettings();
+  };
   dialog.oncancel = (event) => {
     event.preventDefault();
     cancelSettings();

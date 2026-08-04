@@ -10,11 +10,13 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 
 - 支持账号密码注册、登录和退出。
 - 本地数据库初始化时提供体验账号 `CaraLin`，密码 `2766`；部署数据是否保留该账号取决于数据库状态。
+- 本地数据库初始化时提供管理员账号 `Admin`，初始密码为 `123`。已有 `Admin` 账号初始化时只补充管理员标记，不覆盖管理员已经修改的密码。
 - 用户名长度为 3 至 24 个字符，密码长度为 4 至 128 个字符；用户名不区分大小写且不可重复。
 - 登录和注册成功后创建永久会话 Cookie。生产环境必须固定 `FLASK_SECRET_KEY`，并设置 `COOKIE_SECURE=true`。
 - `GET /api/auth/me` 未登录时返回 `200` 和 `{"user": null}`；其他业务 API 未登录时返回 `401` 和 `{"error":"请先登录"}`。
 - 自定义角色、对话、消息、翻译缓存和语音缓存按用户隔离。
 - 预置角色对所有用户可见，但每个用户可以通过覆盖记录保存自己的名称、身份背景、头像、语言和音色配置。
+- 管理员可以在“我的”页面打开用户管理，查看用户列表、添加普通用户、为用户设置新密码和删除普通用户；管理员不能删除自己或其他管理员。用户列表不得返回密码哈希。
 
 ## 3. 角色与音色
 
@@ -29,6 +31,8 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 5. 角色音色：从后端系统音色目录选择。
 
 角色语言固定作用于提示词和实时通话，不根据用户当前输入自动切换。旧数据库列可以暂时保留用于迁移兼容，但新界面和提示词构造只依赖上述当前字段。
+
+- 角色配置弹窗对自定义角色提供删除操作。删除需要二次确认，并级联删除该角色的对话、消息、翻译缓存和语音缓存；预置角色不可删除。
 
 ### 3.2 预置角色和系统音色
 
@@ -72,6 +76,7 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 - 单条用户消息长度为 1 至 4000 个字符；模型只接收当前对话最近 24 条消息。
 - 用户消息使用气泡显示，不显示“你”“You”或其他身份标签。
 - 助手消息支持复制、翻译、重新生成和朗读。翻译结果按用户和消息缓存，重新生成后会清理该消息的翻译与语音缓存。
+- 用户消息可以点击进入行内编辑，编辑后重新发送。服务端生成新回复成功后，保留被编辑用户消息的 ID，删除该消息之后的旧聊天历史并插入新的助手回复；模型生成失败或并发冲突时原历史保持不变。
 - 文本回复通过 SSE 增量返回 `delta`，结束时返回 `done`；上游异常通过 SSE `error` 事件返回，不改变已经建立的 HTTP 状态码。
 - 多行输入框支持浏览器原生垂直拖拽；聊天发送操作区保持稳定，不因输入框拖拽破坏布局。
 
@@ -106,10 +111,11 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 
 ## 8. 主要接口契约
 
-- 认证：`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`。
-- 资源：`GET /api/voices`、`GET/POST /api/characters`、`PATCH /api/characters/<id>`。
+- 认证：`POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`。认证用户对象包含 `id`、`username`、`isAdmin` 和 `createdAt`。
+- 管理员：`GET/POST /api/admin/users`、`PATCH /api/admin/users/<user_id>/password`、`DELETE /api/admin/users/<user_id>`。管理员 API 对普通用户返回 `403`。
+- 资源：`GET/POST /api/characters`、`PATCH/DELETE /api/characters/<id>`。只有自定义角色所有者可以删除角色，预置角色删除返回 `409`。
 - 对话：`GET/POST /api/characters/<id>/conversations`、`PATCH/DELETE /api/characters/<id>/conversations/<conversation_id>`、`GET .../messages`。
-- 聊天：`POST /api/characters/<id>/chat`、`POST /api/characters/<id>/messages/<message_id>/regenerate`。
+- 聊天：`POST /api/characters/<id>/chat`、`POST /api/characters/<id>/messages/<message_id>/regenerate`、`POST /api/characters/<id>/messages/<message_id>/rewrite`。聊天 SSE `done` 事件包含助手 `messageId` 和用户 `userMessageId`。
 - 翻译与朗读：`POST .../translate`、`POST .../messages/<message_id>/speak`、`POST .../speak`。
 - 实时配置：`GET /api/token?characterId=<id>`。该名称沿用现有前端契约，返回的是实时会话配置而非访问令牌。
 - 不存在角色、对话或无权访问资源时返回 `404`；字段、长度、语言、头像或音色校验失败时返回 `400`；重复账号返回 `409`；不满足重新生成条件时返回 `409`。
@@ -130,8 +136,10 @@ Get-Content frontend/service-worker.js | node --input-type=module --check
 ### 9.2 浏览器人工验收
 
 - 检查登录、注册、退出、联系人搜索、新建角色、角色编辑、我的页面和多对话管理。
+- 使用 `Admin / 123` 登录，检查“我的”页面的用户管理入口；添加用户、设置密码、删除用户，并确认普通用户不能访问管理员 API。
+- 在自定义角色配置弹窗中确认删除按钮和二次确认；确认预置角色配置弹窗不显示删除按钮。
 - 确认新建和编辑页面包含头像、角色名称、身份背景、回答语言和角色音色，且没有音色设计或 `input[type=range]` 入口。
-- 检查用户消息无身份标签，助手消息的复制、翻译、重新生成和朗读操作可用。
+- 检查用户消息无身份标签，点击用户消息可行内编辑并重新发送；确认编辑后其后的旧历史被替换，助手消息的复制、翻译、重新生成和朗读操作可用。
 - 检查输入框垂直拖拽、聊天底部操作区、移动端与窄桌面无横向溢出和文字重叠。
 - 检查实时通话的建连状态、字幕、输入输出音量、静音和挂断。
 - 检查 PWA 安装、Service Worker 注册、网络失败时的应用壳回退，以及 API 不被缓存。

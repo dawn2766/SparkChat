@@ -338,6 +338,22 @@
   background: transparent;
 }
 
+.compact-button {
+  min-height: 34px;
+  padding-inline: 10px;
+  font-size: var(--text-xs);
+}
+
+.dialog-actions-split {
+  justify-content: space-between;
+}
+
+.dialog-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
 .full-width {
   width: 100%;
 }

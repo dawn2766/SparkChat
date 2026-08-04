@@ -72,6 +72,36 @@
     grid-template-columns: 58px minmax(0, 1fr);
   }
 
+  .user-create-form {
+    grid-template-columns: 1fr;
+  }
+
+  .user-create-form .primary-button {
+    width: 100%;
+  }
+
+  .user-admin-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .user-admin-actions {
+    width: 100%;
+  }
+
+  .user-admin-actions .compact-button {
+    flex: 1;
+  }
+
+  .user-password-form > div {
+    flex-wrap: wrap;
+  }
+
+  .user-password-form .text-input {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
   .avatar-choose {
     grid-column: 1 / -1;
   }

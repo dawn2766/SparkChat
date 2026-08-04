@@ -51,6 +51,57 @@ class SparkChatApiTest(unittest.TestCase):
         )
         self.assertNotIn("unreadCount", response.json["characters"][0])
 
+    def test_admin_account_and_user_management(self):
+        self.assertEqual(self.client.get("/api/admin/users").status_code, 401)
+        self.login("Admin", "123")
+        me = self.client.get("/api/auth/me")
+        self.assertTrue(me.json["user"]["isAdmin"])
+        created = self.client.post(
+            "/api/admin/users", json={"username": "managed-user", "password": "abcd"}
+        )
+        self.assertEqual(created.status_code, 201)
+        user_id = created.json["user"]["id"]
+        self.assertNotIn("passwordHash", created.json["user"])
+        reset = self.client.patch(
+            f"/api/admin/users/{user_id}/password", json={"password": "efgh"}
+        )
+        self.assertEqual(reset.status_code, 200)
+        self.client.post("/api/auth/logout")
+        self.login("managed-user", "efgh")
+        self.assertEqual(self.client.get("/api/admin/users").status_code, 403)
+        self.client.post("/api/auth/logout")
+        self.login("Admin", "123")
+        self.assertEqual(self.client.delete(f"/api/admin/users/{user_id}").status_code, 200)
+        self.assertEqual(self.client.delete("/api/admin/users/2").status_code, 409)
+
+    def test_custom_character_delete_cascades_and_preset_is_protected(self):
+        self.login()
+        voice = self.client.get("/api/voices").json["voices"][0]
+        created = self.client.post(
+            "/api/characters",
+            json={"name": "待删除角色", "persona": "测试", "voiceId": voice["id"], "voiceName": voice["name"]},
+        )
+        character_id = created.json["character"]["id"]
+        conversation = self.client.post(f"/api/characters/{character_id}/conversations").json["conversation"]
+        with self.app.app_context():
+            database = __import__("backend.app", fromlist=["get_db"]).get_db()
+            message = database.execute(
+                "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (1, ?, ?, 'assistant', '缓存回复')",
+                (character_id, conversation["id"]),
+            )
+            database.execute(
+                "INSERT INTO translation_cache (user_id, message_id, translated_text) VALUES (1, ?, 'translation')",
+                (message.lastrowid,),
+            )
+            database.commit()
+        self.assertEqual(self.client.delete(f"/api/characters/{character_id}").status_code, 200)
+        with self.app.app_context():
+            database = __import__("backend.app", fromlist=["get_db"]).get_db()
+            self.assertIsNone(database.execute("SELECT 1 FROM characters WHERE id = ?", (character_id,)).fetchone())
+            self.assertIsNone(database.execute("SELECT 1 FROM translation_cache WHERE message_id = ?", (message.lastrowid,)).fetchone())
+        preset_id = self.client.get("/api/characters").json["characters"][0]["id"]
+        self.assertEqual(self.client.delete(f"/api/characters/{preset_id}").status_code, 409)
+
     def test_pwa_manifest_uses_relative_scope(self):
         response = self.client.get("/manifest.webmanifest")
 
@@ -642,6 +693,55 @@ class SparkChatApiTest(unittest.TestCase):
                 ).status_code,
                 404,
             )
+        finally:
+            token_server.ark.responses = original_responses
+
+    def test_edit_user_message_rewrites_history_atomically(self):
+        from backend import app as token_server
+
+        class Delta:
+            type = "response.output_text.delta"
+            delta = "新的回复"
+
+        class FakeResponses:
+            @staticmethod
+            def create(**_kwargs):
+                return [Delta()]
+
+        original_responses = token_server.ark.responses
+        token_server.ark.responses = FakeResponses()
+        try:
+            self.login()
+            conversation = self.client.post("/api/characters/1/conversations").json["conversation"]
+            conversation_id = conversation["id"]
+            with self.app.app_context():
+                database = token_server.get_db()
+                rows = [
+                    ("user", "旧问题"),
+                    ("assistant", "旧回复"),
+                    ("user", "后续问题"),
+                    ("assistant", "后续回复"),
+                ]
+                ids = []
+                for role, content in rows:
+                    cursor = database.execute(
+                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (1, 1, ?, ?, ?)",
+                        (conversation_id, role, content),
+                    )
+                    ids.append(cursor.lastrowid)
+                database.execute("UPDATE conversations SET title = '旧问题' WHERE id = ?", (conversation_id,))
+                database.commit()
+            response = self.client.post(
+                f"/api/characters/1/messages/{ids[0]}/rewrite",
+                json={"content": "编辑后的问题"},
+            )
+            self.assertEqual(response.status_code, 200)
+            events = b"".join(response.response).decode("utf-8")
+            self.assertIn('"type": "done"', events)
+            messages = self.client.get(f"/api/characters/1/conversations/{conversation_id}/messages").json["messages"]
+            self.assertEqual([message["content"] for message in messages], ["编辑后的问题", "新的回复"])
+            self.assertEqual(messages[0]["id"], ids[0])
+            self.assertEqual(self.client.get(f"/api/characters/1/conversations").json["conversations"][0]["title"], "编辑后的问题")
         finally:
             token_server.ark.responses = original_responses
 

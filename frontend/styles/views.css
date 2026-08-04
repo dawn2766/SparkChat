@@ -703,6 +703,119 @@
   gap: 28px;
 }
 
+.user-manager-dialog {
+  width: min(92vw, 560px);
+}
+
+.user-create-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.user-create-form .field {
+  margin-bottom: 0;
+}
+
+.user-list-head {
+  margin: 22px 0 8px;
+}
+
+.user-admin-list {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.user-admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 9px 10px 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.user-admin-identity {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.user-admin-identity strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-admin-identity span,
+.current-user-tag {
+  color: var(--muted);
+  font: var(--text-xs) var(--font-mono);
+}
+
+.user-admin-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.user-password-form {
+  width: 100%;
+}
+
+.user-password-form > div {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.user-password-form .text-input {
+  min-width: 0;
+  flex: 1;
+  height: 38px;
+}
+
+.user-bubble {
+  width: 100%;
+  display: block;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-bubble:hover {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px rgb(216 243 93 / 10%);
+}
+
+.message-edit-form {
+  display: grid;
+  gap: 8px;
+  min-width: min(100%, 340px);
+}
+
+.message-edit-form .text-area {
+  min-height: 86px;
+  background: var(--surface-raised);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .profile-card h2 {
   margin: 0 0 5px;
   font-size: 17px;

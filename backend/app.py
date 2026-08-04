@@ -205,6 +205,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE COLLATE NOCASE,
             password_hash TEXT NOT NULL,
+            is_admin INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS characters (
@@ -281,6 +282,9 @@ def init_db():
         );
         """
     )
+    user_columns = {row["name"] for row in database.execute("PRAGMA table_info(users)").fetchall()}
+    if "is_admin" not in user_columns:
+        database.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
     if "language" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
@@ -365,6 +369,11 @@ def init_db():
         ("CaraLin", generate_password_hash("2766")),
     )
     database.execute(
+        "INSERT OR IGNORE INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)",
+        ("Admin", generate_password_hash("123")),
+    )
+    database.execute("UPDATE users SET is_admin = 1 WHERE username = ? COLLATE NOCASE", ("Admin",))
+    database.execute(
         """
         INSERT INTO characters (
             owner_id, name, persona, voice_id, voice_name, language, avatar_url, is_preset
@@ -416,11 +425,39 @@ def init_db():
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("user_id"):
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify(error="请先登录"), 401
+        user = get_db().execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user is None:
+            session.clear()
             return jsonify(error="请先登录"), 401
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        user = get_db().execute(
+            "SELECT is_admin FROM users WHERE id = ?", (session["user_id"],)
+        ).fetchone()
+        if user is None or not user["is_admin"]:
+            return jsonify(error="需要管理员权限"), 403
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def serialize_user(row):
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "isAdmin": bool(row["is_admin"]),
+        "createdAt": row["created_at"] if "created_at" in row.keys() else None,
+    }
 
 
 def serialize_character(row):
@@ -468,14 +505,15 @@ def register():
     session.permanent = True
     session["user_id"] = cursor.lastrowid
     session["username"] = username
-    return jsonify(user={"id": cursor.lastrowid, "username": username}), 201
+    user = get_db().execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return jsonify(user=serialize_user(user)), 201
 
 
 @app.post("/api/auth/login")
 def login():
     payload = request.get_json(silent=True) or {}
     user = get_db().execute(
-        "SELECT id, username, password_hash FROM users WHERE username = ? COLLATE NOCASE",
+        "SELECT id, username, password_hash, is_admin, created_at FROM users WHERE username = ? COLLATE NOCASE",
         (payload.get("username", "").strip(),),
     ).fetchone()
     if user is None or not check_password_hash(user["password_hash"], payload.get("password", "")):
@@ -484,7 +522,7 @@ def login():
     session.permanent = True
     session["user_id"] = user["id"]
     session["username"] = user["username"]
-    return jsonify(user={"id": user["id"], "username": user["username"]})
+    return jsonify(user=serialize_user(user))
 
 
 @app.post("/api/auth/logout")
@@ -497,7 +535,73 @@ def logout():
 def current_user():
     if not session.get("user_id"):
         return jsonify(user=None)
-    return jsonify(user={"id": session["user_id"], "username": session["username"]})
+    user = get_db().execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+    if user is None:
+        session.clear()
+        return jsonify(user=None)
+    return jsonify(user=serialize_user(user))
+
+
+@app.get("/api/admin/users")
+@admin_required
+def list_users():
+    rows = get_db().execute(
+        "SELECT id, username, is_admin, created_at FROM users ORDER BY is_admin DESC, username COLLATE NOCASE"
+    ).fetchall()
+    return jsonify(users=[serialize_user(row) for row in rows])
+
+
+@app.post("/api/admin/users")
+@admin_required
+def create_user():
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    if len(username) < 3 or len(username) > 24:
+        return jsonify(error="账号长度需为 3 至 24 个字符"), 400
+    if len(password) < 4 or len(password) > 128:
+        return jsonify(error="密码长度需为 4 至 128 个字符"), 400
+    try:
+        cursor = get_db().execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (username, generate_password_hash(password)),
+        )
+        get_db().commit()
+    except sqlite3.IntegrityError:
+        return jsonify(error="该账号已存在"), 409
+    user = get_db().execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return jsonify(user=serialize_user(user)), 201
+
+
+@app.patch("/api/admin/users/<int:user_id>/password")
+@admin_required
+def reset_user_password(user_id):
+    password = str((request.get_json(silent=True) or {}).get("password", ""))
+    if len(password) < 4 or len(password) > 128:
+        return jsonify(error="密码长度需为 4 至 128 个字符"), 400
+    cursor = get_db().execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(password), user_id),
+    )
+    if cursor.rowcount == 0:
+        return jsonify(error="未找到该用户"), 404
+    get_db().commit()
+    return jsonify(ok=True)
+
+
+@app.delete("/api/admin/users/<int:user_id>")
+@admin_required
+def delete_user(user_id):
+    if user_id == session["user_id"]:
+        return jsonify(error="不能删除当前管理员账号"), 409
+    user = get_db().execute("SELECT id, is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    if user is None:
+        return jsonify(error="未找到该用户"), 404
+    if user["is_admin"]:
+        return jsonify(error="不能删除管理员账号"), 409
+    get_db().execute("DELETE FROM users WHERE id = ?", (user_id,))
+    get_db().commit()
+    return jsonify(ok=True)
 
 
 @app.get("/api/voices")
@@ -641,6 +745,22 @@ def update_character(character_id):
     get_db().commit()
     row = get_character(character_id)
     return jsonify(character=serialize_character(row))
+
+
+@app.delete("/api/characters/<int:character_id>")
+@login_required
+def delete_character(character_id):
+    character = get_character(character_id)
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    if character["is_preset"]:
+        return jsonify(error="预置角色不可删除"), 409
+    get_db().execute(
+        "DELETE FROM characters WHERE id = ? AND owner_id = ?",
+        (character_id, session["user_id"]),
+    )
+    get_db().commit()
+    return jsonify(ok=True)
 
 
 def get_character(character_id):
@@ -806,7 +926,16 @@ def invalidate_message_cache(message_id, user_id=None):
     )
 
 
-def stream_character_response(character, conversation_id, history, replace_message_id=None):
+def stream_character_response(
+    character,
+    conversation_id,
+    history,
+    replace_message_id=None,
+    user_message_id=None,
+    rewrite_message_id=None,
+    rewrite_content=None,
+    expected_tail_id=None,
+):
     @stream_with_context
     def generate():
         full_response = []
@@ -825,7 +954,59 @@ def stream_character_response(character, conversation_id, history, replace_messa
             final_text = "".join(full_response).strip()
             message_id = replace_message_id
             if final_text:
-                if replace_message_id is None:
+                if rewrite_message_id is not None:
+                    database = get_db()
+                    database.execute("BEGIN IMMEDIATE")
+                    current_tail = database.execute(
+                        "SELECT MAX(id) AS id FROM messages WHERE conversation_id = ? AND user_id = ?",
+                        (conversation_id, session["user_id"]),
+                    ).fetchone()["id"]
+                    if current_tail != expected_tail_id:
+                        database.rollback()
+                        raise RuntimeError("该对话已发生变化，请刷新后重试")
+                    target = database.execute(
+                        """
+                        SELECT id, role FROM messages
+                        WHERE id = ? AND user_id = ? AND character_id = ?
+                            AND conversation_id = ? AND role = 'user'
+                        """,
+                        (rewrite_message_id, session["user_id"], character["id"], conversation_id),
+                    ).fetchone()
+                    if target is None:
+                        database.rollback()
+                        raise RuntimeError("未找到可编辑的用户消息")
+                    database.execute(
+                        "UPDATE messages SET content = ? WHERE id = ?",
+                        (rewrite_content, rewrite_message_id),
+                    )
+                    database.execute(
+                        "DELETE FROM messages WHERE conversation_id = ? AND user_id = ? AND id > ?",
+                        (conversation_id, session["user_id"], rewrite_message_id),
+                    )
+                    cursor = database.execute(
+                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'assistant', ?)",
+                        (session["user_id"], character["id"], conversation_id, final_text),
+                    )
+                    message_id = cursor.lastrowid
+                    conversation = database.execute(
+                        "SELECT title_custom FROM conversations WHERE id = ? AND user_id = ?",
+                        (conversation_id, session["user_id"]),
+                    ).fetchone()
+                    has_previous_user = database.execute(
+                        "SELECT 1 FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? LIMIT 1",
+                        (conversation_id, rewrite_message_id),
+                    ).fetchone()
+                    if conversation and not conversation["title_custom"] and has_previous_user is None:
+                        database.execute(
+                            "UPDATE conversations SET title = ? WHERE id = ? AND user_id = ?",
+                            (rewrite_content[:80], conversation_id, session["user_id"]),
+                        )
+                    database.execute(
+                        "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+                        (conversation_id, session["user_id"]),
+                    )
+                    database.commit()
+                elif replace_message_id is None:
                     cursor = get_db().execute(
                         "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'assistant', ?)",
                         (session["user_id"], character["id"], conversation_id, final_text),
@@ -842,7 +1023,7 @@ def stream_character_response(character, conversation_id, history, replace_messa
                     (conversation_id, session["user_id"]),
                 )
                 get_db().commit()
-            yield f"data: {json.dumps({'type': 'done', 'messageId': message_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'messageId': message_id, 'userMessageId': user_message_id}, ensure_ascii=False)}\n\n"
         except Exception as error:
             app.logger.exception("Chat stream failed")
             yield f"data: {json.dumps({'type': 'error', 'message': str(error)}, ensure_ascii=False)}\n\n"
@@ -876,7 +1057,7 @@ def chat(character_id):
         return jsonify(error="未找到该对话"), 404
 
     database = get_db()
-    database.execute(
+    user_cursor = database.execute(
         "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'user', ?)",
         (session["user_id"], character_id, conversation_id, content),
     )
@@ -900,7 +1081,46 @@ def chat(character_id):
     ).fetchall()[::-1]
     database.commit()
 
-    return stream_character_response(character, conversation_id, history)
+    return stream_character_response(character, conversation_id, history, user_message_id=user_cursor.lastrowid)
+
+
+@app.post("/api/characters/<int:character_id>/messages/<int:message_id>/rewrite")
+@login_required
+def rewrite_message(character_id, message_id):
+    character = get_character(character_id)
+    payload = request.get_json(silent=True) or {}
+    content = str(payload.get("content", "")).strip()
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    if not content or len(content) > 4000:
+        return jsonify(error="消息内容需为 1 至 4000 个字符"), 400
+    target = get_db().execute(
+        """
+        SELECT id, conversation_id FROM messages
+        WHERE id = ? AND user_id = ? AND character_id = ? AND role = 'user'
+        """,
+        (message_id, session["user_id"], character_id),
+    ).fetchone()
+    if target is None or target["conversation_id"] is None:
+        return jsonify(error="未找到可编辑的用户消息"), 404
+    tail = get_db().execute(
+        "SELECT MAX(id) AS id FROM messages WHERE conversation_id = ? AND user_id = ?",
+        (target["conversation_id"], session["user_id"]),
+    ).fetchone()["id"]
+    history = get_db().execute(
+        "SELECT role, content FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT 23",
+        (target["conversation_id"], message_id),
+    ).fetchall()[::-1]
+    history = [*history, {"role": "user", "content": content}]
+    return stream_character_response(
+        character,
+        target["conversation_id"],
+        history,
+        rewrite_message_id=message_id,
+        rewrite_content=content,
+        expected_tail_id=tail,
+        user_message_id=message_id,
+    )
 
 
 @app.post("/api/characters/<int:character_id>/messages/<int:message_id>/regenerate")
