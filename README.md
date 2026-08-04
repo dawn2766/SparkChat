@@ -61,6 +61,8 @@ COOKIE_SECURE=false
 
 音色属于数字角色，而不是独立的用户资源。系统通过 `/api/voices` 提供只读音色目录，角色记录中的 `voice_id` 保存真实豆包 speaker ID；预置角色的用户级覆盖也保存自己的 speaker ID。聊天朗读和端到端实时语音都直接读取同一角色 speaker，因此不存在 TTS 音色与实时音色的两套环境映射，也不提供自定义音色设计、声音复刻、训练状态、试听或重命名功能。
 
+头像存储：上传头像在浏览器裁切为 512×512 JPEG 后，服务端将 data URL 解码为 `data/avatars/<sha256>.<ext>` 内容寻址文件，数据库只保存相对 URL（例如 `./media/avatars/<sha256>.jpg`）。媒体接口使用长期不可变缓存；文件名包含内容哈希，因此头像更新不会覆盖旧文件。预置威震天头像从 CaraLin 当前头像生成一次快照，之后 CaraLin 修改个人覆盖头像不会改变预置角色默认头像。
+
 聊天朗读使用豆包 V3 HTTP Chunked TTS，资源 `seed-icl-2.0`、模型 `seed-tts-2.0-expressive`，统一通过新版控制台 `X-Api-Key` 鉴权。实时 WebSocket 资源 ID 使用 `DOUBAO_REALTIME_RESOURCE_ID`，角色 speaker 由服务端按角色返回，API Key 不暴露给浏览器。
 
 文本聊天模型可在需要表现情绪、动作或细微表情时，在台词前生成简短括号舞台提示。聊天朗读不会读出提示，使用 `seed-tts-2.0-expressive` 和 `<cot>` 分段语音标签。端到端实时语音不使用括号协议，只将角色身份、回答规则和 `speaking_style` 发送给实时模型，由模型直接控制语音表现。

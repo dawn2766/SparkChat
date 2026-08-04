@@ -13,6 +13,7 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory, ses
 from openai import OpenAI
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .avatar_storage import AVATAR_DATA_URL, store_avatar_snapshot
 from .realtime_server import REALTIME_SPEAKING_STYLES, normalize_prompt_language
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
@@ -21,6 +22,7 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", PROJECT_ROOT / "data" / "sparkchat.db"))
+AVATAR_DIR = Path(os.getenv("AVATAR_DIR", DATABASE_PATH.parent / "avatars")).resolve()
 
 
 def get_secret_key():
@@ -395,7 +397,7 @@ def init_db():
         """
         UPDATE characters
         SET persona = ?, voice_id = CASE WHEN voice_id = 'megadeep' THEN ? ELSE voice_id END,
-            voice_name = ?, language = ?, avatar_url = ?
+            voice_name = ?, language = ?
         WHERE is_preset = 1 AND name = ?
         """,
         (
@@ -403,7 +405,6 @@ def init_db():
             PRESET_CHARACTER["voice_id"],
             PRESET_CHARACTER["voice_name"],
             PRESET_CHARACTER["language"],
-            PRESET_CHARACTER["avatar_url"],
             PRESET_CHARACTER["name"],
         ),
     )
@@ -477,9 +478,10 @@ def serialize_character(row):
 
 def avatar_url_from(payload, default=""):
     avatar_url = str(payload.get("avatarUrl", default)).strip()
+    if AVATAR_DATA_URL.fullmatch(avatar_url):
+        return store_avatar_snapshot(avatar_url, AVATAR_DIR)
     if avatar_url and not (
-        avatar_url.startswith("/assets/")
-        or re.match(r"^data:image/(?:jpeg|jpg|png|webp);base64,", avatar_url)
+        avatar_url.startswith("/assets/") or avatar_url.startswith("./media/avatars/")
     ):
         raise ValueError("头像格式无效")
     return avatar_url
@@ -1328,6 +1330,20 @@ def get_token():
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.get("/media/avatars/<path:filename>")
+def avatar_media(filename):
+    content_types = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    content_type = content_types.get(Path(filename).suffix.lower())
+    if content_type is None:
+        return jsonify(error="头像文件格式无效"), 404
+    response = send_from_directory(
+        AVATAR_DIR, filename, max_age=31536000, mimetype=content_type
+    )
+    response.cache_control.public = True
+    response.cache_control.immutable = True
+    return response
 
 
 @app.after_request

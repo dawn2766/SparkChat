@@ -51,6 +51,50 @@ class SparkChatApiTest(unittest.TestCase):
         )
         self.assertNotIn("unreadCount", response.json["characters"][0])
 
+    def test_preset_avatar_does_not_follow_later_caralin_changes(self):
+        from backend.app import PRESET_CHARACTER, get_db, init_db
+
+        default_avatar = "data:image/webp;base64,REVGQVVMVA=="
+        updated_caralin_avatar = "data:image/webp;base64,VVBEQVRFRA=="
+        with self.app.app_context():
+            database = get_db()
+            character = database.execute(
+                "SELECT id FROM characters WHERE is_preset = 1 AND name = '威震天'"
+            ).fetchone()
+            database.execute(
+                "UPDATE characters SET avatar_url = ? WHERE id = ?",
+                (default_avatar, character["id"]),
+            )
+            database.execute(
+                """
+                INSERT INTO character_overrides (
+                    user_id, character_id, name, persona, voice_id, voice_name, language, avatar_url
+                )
+                SELECT 1, id, name, persona, voice_id, voice_name, language, ?
+                FROM characters WHERE id = ?
+                ON CONFLICT(user_id, character_id) DO UPDATE SET avatar_url = excluded.avatar_url
+                """,
+                (updated_caralin_avatar, character["id"]),
+            )
+            database.commit()
+
+            try:
+                init_db()
+                persisted_avatar = database.execute(
+                    "SELECT avatar_url FROM characters WHERE id = ?", (character["id"],)
+                ).fetchone()["avatar_url"]
+                self.assertEqual(persisted_avatar, default_avatar)
+            finally:
+                database.execute(
+                    "DELETE FROM character_overrides WHERE user_id = 1 AND character_id = ?",
+                    (character["id"],),
+                )
+                database.execute(
+                    "UPDATE characters SET avatar_url = ? WHERE id = ?",
+                    (PRESET_CHARACTER["avatar_url"], character["id"]),
+                )
+                database.commit()
+
     def test_admin_account_and_user_management(self):
         self.assertEqual(self.client.get("/api/admin/users").status_code, 401)
         self.login("Admin", "123")
@@ -119,6 +163,21 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Cache-Control"], "no-cache")
         self.assertEqual(response.headers["Service-Worker-Allowed"], "/")
+        response.close()
+
+    def test_avatar_media_is_served_with_immutable_cache(self):
+        from backend.app import AVATAR_DIR
+
+        AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+        (AVATAR_DIR / "avatar.webp").write_bytes(b"avatar-image")
+
+        response = self.client.get("/media/avatars/avatar.webp")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"avatar-image")
+        self.assertEqual(response.content_type, "image/webp")
+        self.assertIn("max-age=31536000", response.headers["Cache-Control"])
+        self.assertIn("immutable", response.headers["Cache-Control"])
         response.close()
 
     def test_old_preset_characters_are_removed_during_migration(self):
@@ -431,7 +490,7 @@ class SparkChatApiTest(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json["character"]["avatarUrl"], "data:image/webp;base64,UklGRg==")
+        self.assertTrue(response.json["character"]["avatarUrl"].startswith("./media/avatars/"))
         character_id = response.json["character"]["id"]
         self.client.post("/api/auth/logout")
         registered = self.client.post(
@@ -987,7 +1046,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["character"]["name"], "已修改角色")
         self.assertEqual(response.json["character"]["voiceId"], voice["id"])
-        self.assertEqual(response.json["character"]["avatarUrl"], "data:image/jpeg;base64,/9j/4AAQ")
+        self.assertTrue(response.json["character"]["avatarUrl"].startswith("./media/avatars/"))
 
         preset_id = self.client.get("/api/characters").json["characters"][0]["id"]
         overridden = self.client.patch(
@@ -996,7 +1055,7 @@ class SparkChatApiTest(unittest.TestCase):
         )
         self.assertEqual(overridden.status_code, 200)
         self.assertEqual(overridden.json["character"]["name"], "修改预设")
-        self.assertEqual(overridden.json["character"]["avatarUrl"], "data:image/webp;base64,UFJFU0VU")
+        self.assertTrue(overridden.json["character"]["avatarUrl"].startswith("./media/avatars/"))
 
         other_client = self.app.test_client()
         registered = other_client.post(
