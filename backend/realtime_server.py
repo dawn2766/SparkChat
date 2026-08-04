@@ -23,6 +23,7 @@ from .realtime_protocol import (
 load_dotenv()
 
 DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+REALTIME_SPEAKING_STYLE = "Speak like a natural, attentive person in a real conversation: clear and expressive, with varied pacing, pauses, emphasis, warmth, and restraint. Respond to your conversation partner's emotional tone without sounding scripted, theatrical, or overly enthusiastic. Let the character's identity shape word choice and attitude through the system instructions, but keep this vocal style consistent for every character."
 logger = logging.getLogger("sparkchat.realtime")
 
 
@@ -49,7 +50,7 @@ def session_payload(config):
     speaker_id = config["speakerId"]
     language = config.get("language", "")
     instructions = config["instructions"]
-    speaking_style = config.get("speakingStyle", "自然、清晰地说话，同时保持角色自身的语气。")
+    speaking_style = config.get("speakingStyle", REALTIME_SPEAKING_STYLE)
     is_o2_clone = speaker_id.startswith("ICL_uranus_")
     is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")) and not is_o2_clone
     payload = {

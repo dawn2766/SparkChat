@@ -293,7 +293,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(final_prompt.count("强制语言规则："), 1)
         self.assertNotIn("用户记忆", final_prompt)
 
-    def test_character_prompt_requires_stage_directions_for_performative_scenes(self):
+    def test_character_prompt_encourages_natural_varied_responses(self):
         from backend.app import SYSTEM_PROMPTS, build_agent_instructions
 
         instructions = build_agent_instructions({
@@ -302,11 +302,34 @@ class SparkChatApiTest(unittest.TestCase):
             "language": "zh",
         })
 
-        self.assertIn("普通事实、知识、步骤问题不要添加括号", instructions)
-        self.assertIn("涉及安慰、告白、调侃、争执", instructions)
-        self.assertIn("添加一处简短的中文全角括号", instructions)
-        self.assertNotIn("用户未要求展开", SYSTEM_PROMPTS["en"])
-        self.assertIn("Response requirements (in priority order):", SYSTEM_PROMPTS["en"])
+        self.assertIn("不是客服或正在扮演角色的助手", instructions)
+        self.assertIn("形成稳定的世界观、价值排序", instructions)
+        self.assertIn("对话者的意见和请求不是命令", instructions)
+        self.assertIn("不要为了讨好对话者而认同", instructions)
+        self.assertNotIn("用户", instructions)
+        self.assertIn("不必每轮恢复成同样的礼貌与热情", instructions)
+        self.assertIn("区分事实、推断、立场和感受", instructions)
+        self.assertIn("不要故意制造错误", instructions)
+        self.assertIn("形式服从内容", instructions)
+        self.assertIn("复杂任务需要时清晰组织", instructions)
+        self.assertIn("可选表现", instructions)
+        self.assertIn("不要凭空创造场景、身体接触或现实行动", instructions)
+        self.assertEqual(instructions.count("只用自然、准确、易懂的中文回答"), 0)
+        self.assertNotIn("安全边界", instructions)
+        self.assertNotIn("遵守法律", instructions)
+        self.assertNotIn("侵害隐私", instructions)
+        self.assertNotIn("危险的行为", instructions)
+        self.assertNotIn("整条回答必须以该括号开头", instructions)
+        self.assertNotIn("每次回答最多一处", instructions)
+        self.assertIn("Response requirements:", SYSTEM_PROMPTS["en"])
+        self.assertIn("not customer support or an assistant acting a part", SYSTEM_PROMPTS["en"])
+        self.assertIn("Independent judgment", SYSTEM_PROMPTS["en"])
+        self.assertIn("do not reset to the same politeness and enthusiasm every turn", SYSTEM_PROMPTS["en"])
+        self.assertIn("Truth and imperfection", SYSTEM_PROMPTS["en"])
+        self.assertIn("Optional expression", SYSTEM_PROMPTS["en"])
+        self.assertIn("at the beginning of a sentence", SYSTEM_PROMPTS["en"])
+        self.assertIn("Form should follow content", SYSTEM_PROMPTS["en"])
+        self.assertNotIn("legal, privacy, and safety", SYSTEM_PROMPTS["en"])
 
     def test_agent_instructions_accept_sqlite_rows(self):
         import sqlite3
@@ -321,8 +344,8 @@ class SparkChatApiTest(unittest.TestCase):
         instructions = build_agent_instructions(character)
 
         self.assertIn("角色名称：测试角色", instructions)
-        self.assertIn("Response requirements (in priority order):", instructions)
-        self.assertIn("Reply only in natural, accurate, concise English", instructions)
+        self.assertIn("Response requirements:", instructions)
+        self.assertIn("Respond in English and never switch to another language", instructions)
 
     def test_session_cookie_survives_new_client(self):
         self.login()
@@ -454,6 +477,7 @@ class SparkChatApiTest(unittest.TestCase):
     def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
         from backend.realtime_server import session_payload
         from backend.app import build_agent_instructions, realtime_character_config
+        from backend.realtime_server import REALTIME_SPEAKING_STYLE
 
         character = {
             "name": "威震天",
@@ -466,18 +490,16 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(
             config["instructions"],
-            build_agent_instructions(character),
+            build_agent_instructions(character, include_stage_directions=False),
         )
         self.assertEqual(config["language"], "en")
         self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
-        self.assertIn("mechanical commander", payload["dialog"]["character_manifest"])
-        self.assertNotRegex(config["speakingStyle"], r"[\u4e00-\u9fff]")
-        self.assertIn("Stage directions", payload["dialog"]["character_manifest"])
-        self.assertIn("entire response must begin with it", payload["dialog"]["character_manifest"])
-        self.assertIn("Never place it in the middle, at the end", payload["dialog"]["character_manifest"])
+        self.assertEqual(config["speakingStyle"], REALTIME_SPEAKING_STYLE)
+        self.assertIn("real conversation", payload["dialog"]["character_manifest"])
+        self.assertNotIn("Stage directions", payload["dialog"]["character_manifest"])
+        self.assertNotIn("most natural position", payload["dialog"]["character_manifest"])
         self.assertTrue(config["instructions"].startswith("Mandatory language rule:"))
-        self.assertTrue(config["instructions"].endswith("even if the user does."))
-        self.assertIn("Speak only English", config["speakingStyle"])
+        self.assertIn("never switch to another language to match your conversation partner", config["instructions"])
 
     def test_realtime_and_text_chat_share_core_language_and_character_rules(self):
         from backend.app import build_agent_instructions, realtime_character_config
@@ -491,15 +513,22 @@ class SparkChatApiTest(unittest.TestCase):
         text_instructions = build_agent_instructions(character)
         realtime_config = realtime_character_config(character)
 
-        for shared_rule in ("角色名称：测试角色", "身份背景：沉着、可靠。", "只用自然、准确、简洁的中文回答"):
+        for shared_rule in ("角色名称：测试角色", "身份背景：沉着、可靠。"):
             self.assertIn(shared_rule, text_instructions)
             self.assertIn(shared_rule, realtime_config["instructions"])
-        self.assertIn("整条回答必须以该括号开头", text_instructions)
-        self.assertIn("整条回答必须以该括号开头", realtime_config["instructions"])
-        self.assertIn("禁止把括号放在台词中间、句末或正文之后", realtime_config["instructions"])
+        self.assertIn("强制语言规则：使用中文回答", text_instructions)
+        self.assertIn("强制语言规则：使用中文回答", realtime_config["instructions"])
+        self.assertIn("可选表现", text_instructions)
+        self.assertNotIn("可选表现", realtime_config["instructions"])
+        self.assertNotIn("放在对话自然发生的位置", realtime_config["instructions"])
         self.assertTrue(realtime_config["instructions"].startswith("强制语言规则："))
-        self.assertTrue(realtime_config["instructions"].endswith("绝对不要切换语言。"))
-        self.assertIn("只说中文，不夹杂英文", realtime_config["speakingStyle"])
+        self.assertIn("不因对话者改用其他语言而切换回答语言", realtime_config["instructions"])
+
+        other_character = {**character, "name": "另一个角色", "persona": "活泼、坦率。", "language": "en"}
+        self.assertEqual(
+            realtime_config["speakingStyle"],
+            realtime_character_config(other_character)["speakingStyle"],
+        )
 
     def test_character_model_is_used_for_text_generation(self):
         from backend import app as token_server
@@ -536,7 +565,7 @@ class SparkChatApiTest(unittest.TestCase):
         payload = session_payload({"speakerId": "S_custom", **config})
 
         self.assertNotIn("机械统帅", payload["dialog"]["character_manifest"])
-        self.assertIn("只用自然、准确、简洁的中文回答", config["instructions"])
+        self.assertIn("强制语言规则：使用中文回答", config["instructions"])
 
     def test_realtime_and_tts_use_same_character_speaker(self):
         from backend import app as token_server
