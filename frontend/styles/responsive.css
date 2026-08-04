@@ -49,11 +49,20 @@
 
   .auth-view {
     min-height: 100dvh;
-    padding: max(22px, env(safe-area-inset-top)) 18px max(22px, env(safe-area-inset-bottom));
+    padding: max(30px, env(safe-area-inset-top)) 22px max(30px, env(safe-area-inset-bottom));
   }
 
   .auth-content h1 {
-    font-size: 34px;
+    font-size: 28px;
+  }
+
+  .auth-brand {
+    margin-bottom: 34px;
+  }
+
+  .auth-brand img {
+    width: 76px;
+    height: 76px;
   }
 
   .message {

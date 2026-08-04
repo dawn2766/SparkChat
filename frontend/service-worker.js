@@ -1,8 +1,7 @@
-const CACHE_NAME = "sparkchat-shell-v4";
+const CACHE_NAME = "sparkchat-shell-v9";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles/app.css",
   "./styles/base.css",
   "./styles/components.css",
   "./styles/views.css",
@@ -11,15 +10,11 @@ const APP_SHELL = [
   "./scripts/api.js",
   "./scripts/dom.js",
   "./scripts/state.js",
-  "./scripts/avatar-cropper.js",
-  "./scripts/doubao-realtime.js",
   "./scripts/realtime-text.js",
   "./scripts/views/auth.js",
-  "./scripts/views/chat.js",
-  "./scripts/views/create.js",
   "./scripts/views/home.js",
-  "./scripts/views/profile.js",
   "./manifest.webmanifest",
+  "./assets/images/sparkchat-logo.png",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",
   "./assets/images/megatron-portrait.jpg"
@@ -48,19 +43,34 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(fetch(request).catch(() => caches.match("./index.html")));
+    event.respondWith(
+      caches.match("./index.html").then((cachedResponse) => {
+        const networkResponse = fetch(request).then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+          }
+          return response;
+        });
+        return cachedResponse || networkResponse.catch(() => caches.match("./index.html"));
+      })
+    );
     return;
   }
 
   event.respondWith(
-    fetch(request)
-      .then((response) => {
+    caches.match(request).then((cachedResponse) => {
+      const networkResponse = fetch(request).then((response) => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         }
         return response;
-      })
-      .catch(() => caches.match(request))
+      });
+
+      event.waitUntil(networkResponse.catch(() => undefined));
+
+      return cachedResponse || networkResponse;
+    })
   );
 });

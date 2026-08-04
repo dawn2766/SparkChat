@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="title">
-  <title>SparkChat</title>
-  <rect width="192" height="192" rx="42" fill="#101415"/>
-  <path d="M42 56c0-10 8-18 18-18h72c10 0 18 8 18 18v54c0 10-8 18-18 18H93l-27 23v-23H60c-10 0-18-8-18-18V56Z" fill="#f2c94c"/>
-  <path d="M67 74h58M67 96h37" fill="none" stroke="#101415" stroke-linecap="round" stroke-width="10"/>
-</svg>

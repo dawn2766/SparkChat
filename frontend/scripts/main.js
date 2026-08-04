@@ -2,32 +2,33 @@ import { api } from "./api.js";
 import { app } from "./dom.js";
 import { state } from "./state.js";
 import { renderAuth } from "./views/auth.js";
-import { renderCreate } from "./views/create.js";
-import { openChat, stopVoiceInteraction } from "./views/chat.js";
-import { renderHome } from "./views/home.js";
-import { renderProfile } from "./views/profile.js";
 
 async function loadHome() {
-  const [characters, voices] = await Promise.all([api("/api/characters"), api("/api/voices")]);
+  const [{ renderHome }, characters, voices] = await Promise.all([
+    import("./views/home.js"),
+    api("/api/characters"),
+    api("/api/voices"),
+  ]);
   state.characters = characters.characters;
   state.voices = voices.voices;
   renderHome({ bindShell, openChat: openCharacter });
 }
 
 async function loadProfile() {
+  const { renderProfile } = await import("./views/profile.js");
   renderProfile({ bindShell, onLogout: () => renderAuth("", loadHome) });
 }
 
 async function openCharacter(id) {
+  const { openChat } = await import("./views/chat.js");
   await openChat(id, loadHome);
 }
 
 function bindShell() {
   document.querySelectorAll("[data-tab]").forEach((tab) => {
     tab.onclick = () => {
-      stopVoiceInteraction();
-      if (tab.dataset.tab === "home") renderHome({ bindShell, openChat: openCharacter });
-      if (tab.dataset.tab === "create") renderCreate({ bindShell, onCreated: loadHome });
+      if (tab.dataset.tab === "home") loadHome();
+      if (tab.dataset.tab === "create") import("./views/create.js").then(({ renderCreate }) => renderCreate({ bindShell, onCreated: loadHome }));
       if (tab.dataset.tab === "profile") loadProfile();
     };
   });
