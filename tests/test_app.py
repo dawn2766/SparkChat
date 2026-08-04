@@ -180,7 +180,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("immutable", response.headers["Cache-Control"])
         response.close()
 
-    def test_old_preset_characters_are_removed_during_migration(self):
+    def test_preset_characters_are_preserved_during_migration(self):
         from backend.app import get_db, init_db
 
         with self.app.app_context():
@@ -195,7 +195,66 @@ class SparkChatApiTest(unittest.TestCase):
                 "SELECT id FROM characters WHERE name = ?", ("旧角色",)
             ).fetchone()
 
-        self.assertIsNone(old_character)
+        self.assertIsNotNone(old_character)
+        with self.app.app_context():
+            get_db().execute("DELETE FROM characters WHERE name = ?", ("旧角色",))
+            get_db().commit()
+
+    def test_admin_preset_character_updates_override_for_all_users(self):
+        from backend.app import get_db
+
+        self.login("Admin", "123")
+        created = self.client.post(
+            "/api/admin/characters",
+            json={
+                "name": "同步角色",
+                "persona": "初始设定",
+                "voiceId": "S_FOMpJ2Da2",
+                "language": "zh",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        character_id = created.json["character"]["id"]
+        self.client.post("/api/auth/logout")
+        self.login("CaraLin", "2766")
+        with self.app.app_context():
+            database = get_db()
+            database.execute(
+                """
+                INSERT INTO character_overrides (
+                    user_id, character_id, name, persona, voice_id, voice_name, language, avatar_url
+                ) VALUES (1, ?, '用户改名', '用户设定', 'S_FOMpJ2Da2', '赛博统帅（英文）', 'zh', '')
+                """,
+                (character_id,),
+            )
+            database.commit()
+        self.client.post("/api/auth/logout")
+        self.login("Admin", "123")
+        updated = self.client.patch(
+            f"/api/admin/characters/{character_id}",
+            json={
+                "name": "同步角色新版",
+                "persona": "管理员最新设定",
+                "voiceId": "S_FOMpJ2Da2",
+                "language": "zh",
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+        with self.app.app_context():
+            self.assertIsNone(
+                get_db().execute(
+                    "SELECT 1 FROM character_overrides WHERE character_id = ?", (character_id,)
+                ).fetchone()
+            )
+        self.client.post("/api/auth/logout")
+        self.login("CaraLin", "2766")
+        listed = self.client.get("/api/characters").json["characters"]
+        synced = next(character for character in listed if character["id"] == character_id)
+        self.assertEqual(synced["name"], "同步角色新版")
+
+        self.client.post("/api/auth/logout")
+        self.login("Admin", "123")
+        self.assertEqual(self.client.delete(f"/api/admin/characters/{character_id}").status_code, 200)
 
     def test_stage_directions_are_preserved_as_speech_cues(self):
         from backend.speech import prepare_speech_text
@@ -265,6 +324,39 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(self.client.post("/api/voices/clone").status_code, 405)
         self.assertEqual(self.client.post("/api/voices/design").status_code, 405)
         self.assertEqual(self.client.patch("/api/voices/S_FOMpJ2Da2").status_code, 405)
+
+    def test_admin_can_add_and_update_system_voice(self):
+        self.login("Admin", "123")
+        created = self.client.post(
+            "/api/admin/voices",
+            json={
+                "name": "测试音色",
+                "id": "S_EOMpJ2Da2",
+                "description": "管理员测试音色",
+                "language": "zh",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json["voice"]["id"], "S_EOMpJ2Da2")
+
+        updated = self.client.patch(
+            "/api/admin/voices/S_EOMpJ2Da2",
+            json={"name": "测试音色新版", "id": "S_EOMpJ2Da2-new"},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json["voice"]["name"], "测试音色新版")
+        voice_ids = {
+            voice["id"] for voice in self.client.get("/api/voices").json["voices"]
+        }
+        self.assertIn("S_EOMpJ2Da2-new", voice_ids)
+        self.assertNotIn("S_EOMpJ2Da2", voice_ids)
+
+    def test_non_admin_cannot_manage_system_voices(self):
+        self.login()
+        response = self.client.post(
+            "/api/admin/voices", json={"name": "越权音色", "id": "S_forbidden"}
+        )
+        self.assertEqual(response.status_code, 403)
 
     def test_character_rejects_unknown_voice_id(self):
         self.login()

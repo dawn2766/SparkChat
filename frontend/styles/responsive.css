@@ -106,6 +106,24 @@
     flex-basis: 100%;
   }
 
+  .admin-manager-dialog {
+    height: min(92vh, 760px);
+  }
+
+  .admin-manager-controls {
+    grid-template-columns: 1fr;
+    padding: 14px 16px;
+  }
+
+  .admin-create-button {
+    width: 100%;
+  }
+
+  .admin-voice-editor,
+  .admin-role-editor {
+    padding: 16px;
+  }
+
   .avatar-choose {
     grid-column: 1 / -1;
   }

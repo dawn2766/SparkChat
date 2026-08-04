@@ -210,6 +210,13 @@ def init_db():
             is_admin INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS voices (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS characters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             owner_id INTEGER,
@@ -355,17 +362,6 @@ def init_db():
             )
             """
         )
-    removed_preset_ids = [
-        row["id"]
-        for row in database.execute(
-            "SELECT id FROM characters WHERE is_preset = 1 AND name <> ?",
-            ("威震天",),
-        ).fetchall()
-    ]
-    for character_id in removed_preset_ids:
-        database.execute("DELETE FROM messages WHERE character_id = ?", (character_id,))
-        database.execute("DELETE FROM character_overrides WHERE character_id = ?", (character_id,))
-        database.execute("DELETE FROM characters WHERE id = ?", (character_id,))
     database.execute(
         "INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)",
         ("CaraLin", generate_password_hash("2766")),
@@ -396,15 +392,12 @@ def init_db():
     database.execute(
         """
         UPDATE characters
-        SET persona = ?, voice_id = CASE WHEN voice_id = 'megadeep' THEN ? ELSE voice_id END,
-            voice_name = ?, language = ?
-        WHERE is_preset = 1 AND name = ?
+        SET voice_id = ?, voice_name = ?
+        WHERE is_preset = 1 AND name = ? AND voice_id = 'megadeep'
         """,
         (
-            MEGATRON_IDENTITY,
             PRESET_CHARACTER["voice_id"],
             PRESET_CHARACTER["voice_name"],
-            PRESET_CHARACTER["language"],
             PRESET_CHARACTER["name"],
         ),
     )
@@ -419,7 +412,15 @@ def init_db():
         """,
         (PRESET_CHARACTER["voice_id"],),
     )
-    database.execute("DROP TABLE IF EXISTS voices")
+    for voice in SYSTEM_VOICES:
+        database.execute(
+            """
+            INSERT INTO voices (id, name, description, language)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+            """,
+            (voice["id"], voice["name"], voice["description"], voice["language"]),
+        )
     database.commit()
 
 
@@ -609,11 +610,178 @@ def delete_user(user_id):
 @app.get("/api/voices")
 @login_required
 def list_voices():
-    return jsonify(voices=SYSTEM_VOICES)
+    rows = get_db().execute(
+        "SELECT id, name, description, language FROM voices ORDER BY created_at, id"
+    ).fetchall()
+    return jsonify(voices=[dict(row) for row in rows])
 
 
 def system_voice(voice_id):
-    return next((voice for voice in SYSTEM_VOICES if voice["id"] == voice_id), None)
+    return get_db().execute(
+        "SELECT id, name, description, language FROM voices WHERE id = ?", (voice_id,)
+    ).fetchone()
+
+
+def character_values(payload, fallback=None):
+    fallback = fallback or {}
+    fallback_value = lambda key, default="": fallback[key] if key in fallback.keys() else default
+    name = str(payload.get("name", fallback_value("name"))).strip()
+    persona = str(payload.get("persona", fallback_value("persona"))).strip()
+    voice_id = str(payload.get("voiceId", fallback_value("voice_id"))).strip()
+    language = str(payload.get("language", fallback_value("language", "zh"))).strip()
+    if not name or not persona or not voice_id:
+        raise ValueError("请完整填写角色名称、人设与音色")
+    if len(name) > 40 or len(persona) > 2400:
+        raise ValueError("角色名称或身份背景超过长度限制")
+    if language not in {"zh", "en"}:
+        raise ValueError("角色语言仅支持中文或英文")
+    voice = system_voice(voice_id)
+    if voice is None:
+        raise ValueError("只能选择系统音色")
+    return name, persona, voice_id, voice["name"], language
+
+
+@app.get("/api/admin/characters")
+@admin_required
+def list_preset_characters():
+    rows = get_db().execute(
+        "SELECT * FROM characters WHERE is_preset = 1 ORDER BY created_at, id"
+    ).fetchall()
+    return jsonify(characters=[serialize_character(row) for row in rows])
+
+
+@app.post("/api/admin/characters")
+@admin_required
+def create_preset_character():
+    payload = request.get_json(silent=True) or {}
+    try:
+        values = character_values(payload)
+        avatar_url = avatar_url_from(payload)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    cursor = get_db().execute(
+        """
+        INSERT INTO characters (
+            owner_id, name, persona, voice_id, voice_name, language, avatar_url, is_preset
+        ) VALUES (NULL, ?, ?, ?, ?, ?, ?, 1)
+        """,
+        (*values, avatar_url),
+    )
+    get_db().commit()
+    row = get_db().execute("SELECT * FROM characters WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return jsonify(character=serialize_character(row)), 201
+
+
+@app.patch("/api/admin/characters/<int:character_id>")
+@admin_required
+def update_preset_character(character_id):
+    character = get_db().execute(
+        "SELECT * FROM characters WHERE id = ? AND is_preset = 1", (character_id,)
+    ).fetchone()
+    if character is None:
+        return jsonify(error="未找到该预置角色"), 404
+    try:
+        values = character_values(request.get_json(silent=True) or {}, character)
+        avatar_url = avatar_url_from(request.get_json(silent=True) or {}, character["avatar_url"])
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    database = get_db()
+    database.execute(
+        """
+        UPDATE characters
+        SET name = ?, persona = ?, voice_id = ?, voice_name = ?, language = ?, avatar_url = ?
+        WHERE id = ?
+        """,
+        (*values, avatar_url, character_id),
+    )
+    database.execute("DELETE FROM character_overrides WHERE character_id = ?", (character_id,))
+    database.commit()
+    row = database.execute("SELECT * FROM characters WHERE id = ?", (character_id,)).fetchone()
+    return jsonify(character=serialize_character(row))
+
+
+@app.delete("/api/admin/characters/<int:character_id>")
+@admin_required
+def delete_preset_character(character_id):
+    character = get_db().execute(
+        "SELECT id FROM characters WHERE id = ? AND is_preset = 1", (character_id,)
+    ).fetchone()
+    if character is None:
+        return jsonify(error="未找到该预置角色"), 404
+    database = get_db()
+    database.execute("DELETE FROM characters WHERE id = ?", (character_id,))
+    database.commit()
+    return jsonify(ok=True)
+
+
+def voice_values(payload):
+    voice_id = str(payload.get("id", "")).strip()
+    name = str(payload.get("name", "")).strip()
+    description = str(payload.get("description", "")).strip()
+    language = str(payload.get("language", "zh")).strip()
+    if not name or not voice_id:
+        raise ValueError("请填写音色名称和 speaker_id")
+    if len(name) > 40 or len(voice_id) > 120 or len(description) > 120:
+        raise ValueError("音色名称、speaker_id 或描述超过长度限制")
+    if not voice_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")):
+        raise ValueError("speaker_id 格式无效")
+    if language not in {"zh", "en"}:
+        raise ValueError("音色语言仅支持中文或英文")
+    return voice_id, name, description, language
+
+
+@app.post("/api/admin/voices")
+@admin_required
+def create_system_voice():
+    try:
+        values = voice_values(request.get_json(silent=True) or {})
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    try:
+        get_db().execute(
+            "INSERT INTO voices (id, name, description, language) VALUES (?, ?, ?, ?)",
+            values,
+        )
+        get_db().commit()
+    except sqlite3.IntegrityError:
+        return jsonify(error="该 speaker_id 已存在"), 409
+    voice = system_voice(values[0])
+    return jsonify(voice=dict(voice)), 201
+
+
+@app.patch("/api/admin/voices/<voice_id>")
+@admin_required
+def update_system_voice(voice_id):
+    current = system_voice(voice_id)
+    if current is None:
+        return jsonify(error="未找到该音色"), 404
+    payload = request.get_json(silent=True) or {}
+    payload.setdefault("id", voice_id)
+    payload.setdefault("description", current["description"])
+    payload.setdefault("language", current["language"])
+    try:
+        values = voice_values(payload)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    try:
+        get_db().execute(
+            "UPDATE voices SET id = ?, name = ?, description = ?, language = ? WHERE id = ?",
+            (*values, voice_id),
+        )
+        get_db().execute(
+            "UPDATE characters SET voice_id = ?, voice_name = ? WHERE voice_id = ?",
+            (values[0], values[1], voice_id),
+        )
+        get_db().execute(
+            "UPDATE character_overrides SET voice_id = ?, voice_name = ? WHERE voice_id = ?",
+            (values[0], values[1], voice_id),
+        )
+        get_db().commit()
+    except sqlite3.IntegrityError:
+        get_db().rollback()
+        return jsonify(error="该 speaker_id 已存在"), 409
+    voice = system_voice(values[0])
+    return jsonify(voice=dict(voice))
 
 
 @app.get("/api/characters")
