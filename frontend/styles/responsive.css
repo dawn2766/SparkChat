@@ -124,6 +124,10 @@
     padding: 16px;
   }
 
+  .voice-admin-form {
+    grid-template-columns: 1fr;
+  }
+
   .avatar-choose {
     grid-column: 1 / -1;
   }

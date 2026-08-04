@@ -783,18 +783,27 @@
 .admin-voice-editor {
   min-width: 0;
   overflow-y: auto;
-  padding: 24px;
+  padding: 28px;
   scrollbar-width: none;
 }
 
 .voice-admin-form {
-  width: min(100%, 560px);
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr);
+  column-gap: 18px;
+  align-items: start;
+}
+
+.voice-admin-form .field {
+  margin-bottom: 18px;
 }
 
 .resource-form-actions {
+  grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
-  padding-top: 18px;
+  padding-top: 20px;
   border-top: 1px solid var(--line);
 }
 
