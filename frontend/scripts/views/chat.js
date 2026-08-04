@@ -13,6 +13,7 @@ let speechRequest = null;
 let speechButton = null;
 let dictationGeneration = 0;
 let pendingDictationConversation = null;
+let composerDraftBeforeEdit = "";
 
 function stopSpeechAudio() {
   speechRequest?.abort();
@@ -96,61 +97,109 @@ function assistantStampMarkup(message, character, canRegenerate = false) {
   return `<span class="stamp">${messageActionsMarkup(message, true, canRegenerate)}</span>`;
 }
 
-function messageMarkup(message, character, canRegenerate = false) {
+function messageMarkup(message, character, canRegenerate = false, canEdit = false) {
   const isAssistant = message.role === "assistant";
   const stamp = isAssistant ? assistantStampMarkup(message, character, canRegenerate) : messageActionsMarkup(message, false);
   const bubble = isAssistant
     ? `<div class="bubble">${esc(message.content)}</div>`
-    : `<button class="bubble user-bubble" type="button" data-edit-user-message aria-label="编辑并重新发送这条消息">${esc(message.content)}</button>`;
+    : canEdit
+      ? `<button class="bubble user-bubble" type="button" data-edit-user-message aria-label="编辑并重新发送这条消息">${esc(message.content)}</button>`
+      : `<div class="bubble">${esc(message.content)}</div>`;
   return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}" data-original-content="${esc(message.content)}"><div class="message-content">${bubble}${stamp}</div></div>`;
 }
 
-async function rewriteUserMessage(message, content) {
+async function rewriteUserMessage(messageId, content) {
   if (state.sending) return;
-  const messageId = Number(message.dataset.messageId);
   if (!messageId) {
     notify("消息仍在保存，请稍后再编辑");
     return;
   }
   state.sending = true;
-  const originalMessages = state.messages.slice();
-  const contentNode = message.querySelector(".message-content");
-  contentNode.innerHTML = `<div class="bubble">${esc(content)}</div><span class="stamp loading-text">正在更新对话…</span>`;
+  const composer = document.querySelector("#composer");
+  composer?.classList.add("is-updating");
+  updateComposerState(composer?.content);
   try {
     await streamChat(state.active.id, content, () => {}, messageId, state.activeConversation.id, true);
     state.messages = (await api(`/api/characters/${state.active.id}/conversations/${state.activeConversation.id}/messages`)).messages;
     state.conversations = (await api(`/api/characters/${state.active.id}/conversations`)).conversations;
     state.activeConversation = state.conversations.find((item) => item.id === state.activeConversation.id) || state.activeConversation;
+    state.sending = false;
     notify("聊天历史已更新");
     renderChat({ onBack: window.__sparkchatBack });
+    restoreComposerDraft();
   } catch (error) {
-    state.messages = originalMessages;
-    notify(error.message);
-    renderChat({ onBack: window.__sparkchatBack });
-  } finally {
     state.sending = false;
+    composer?.classList.remove("is-updating");
+    updateComposerState(composer?.content);
+    notify(error.message);
   }
 }
 
+function restoreComposerDraft() {
+  const composer = document.querySelector("#composer");
+  if (!composer) return;
+  const textarea = composer.content;
+  textarea.value = composerDraftBeforeEdit;
+  composerDraftBeforeEdit = "";
+  const hasDraft = textarea.value.trim().length > 0;
+  composer.classList.toggle("restore-composer-state", hasDraft);
+  resizeComposer(textarea);
+  updateComposerState(textarea);
+  if (hasDraft) requestAnimationFrame(() => composer.classList.remove("restore-composer-state"));
+}
+
+function cancelUserMessageEdit() {
+  const composer = document.querySelector("#composer");
+  if (!composer || state.sending) return;
+  const textarea = composer.content;
+  textarea.value = composerDraftBeforeEdit;
+  composerDraftBeforeEdit = "";
+  delete composer.dataset.editMessageId;
+  composer.classList.remove("editing-message", "is-updating");
+  document.querySelector(".chat-view")?.classList.remove("editing-message");
+  textarea.placeholder = "输入消息…";
+  const sendButton = composer.querySelector(".send");
+  sendButton.setAttribute("aria-label", "发送");
+  sendButton.innerHTML = '<i data-lucide="send"></i>';
+  const hasDraft = textarea.value.trim().length > 0;
+  composer.classList.toggle("restore-composer-state", hasDraft);
+  resetTextareaSize(textarea);
+  resizeComposer(textarea);
+  updateComposerState(textarea);
+  if (hasDraft) requestAnimationFrame(() => composer.classList.remove("restore-composer-state"));
+  refreshIcons();
+}
+
 function beginUserMessageEdit(message) {
-  if (state.sending || message.querySelector(".message-edit-form")) return;
+  if (state.sending) return;
   const original = message.dataset.originalContent || message.querySelector(".bubble")?.textContent || "";
-  const contentNode = message.querySelector(".message-content");
-  contentNode.innerHTML = `<form class="message-edit-form"><textarea class="text-area" name="content" maxlength="4000" required aria-label="编辑消息"></textarea><div class="message-edit-actions"><button class="secondary-button" type="button" data-cancel-edit>取消</button><button class="primary-button" type="submit">更新并发送</button></div></form>`;
-  const form = contentNode.querySelector("form");
-  form.content.value = original;
-  form.querySelector("[data-cancel-edit]").onclick = () => renderChat({ onBack: window.__sparkchatBack });
-  form.onsubmit = async (event) => {
-    event.preventDefault();
-    const content = form.content.value.trim();
-    if (!content || content === original) {
-      if (content === original) renderChat({ onBack: window.__sparkchatBack });
-      return;
-    }
-    await rewriteUserMessage(message, content);
-  };
-  form.content.focus();
-  form.content.setSelectionRange(form.content.value.length, form.content.value.length);
+  const composer = document.querySelector("#composer");
+  const textarea = composer.content;
+  composerDraftBeforeEdit = textarea.value;
+  composer.dataset.editMessageId = message.dataset.messageId;
+  composer.classList.add("editing-message");
+  document.querySelector(".chat-view")?.classList.add("editing-message");
+  textarea.value = original;
+  textarea.placeholder = "修改消息…";
+  const sendButton = composer.querySelector(".send");
+  sendButton.setAttribute("aria-label", "更新并发送");
+  sendButton.innerHTML = '<i data-lucide="check"></i>';
+  resizeComposer(textarea);
+  updateComposerState(textarea);
+  refreshIcons();
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+function bindComposerOutsideClick() {
+  const chatView = document.querySelector(".chat-view");
+  const composer = document.querySelector("#composer");
+  if (!chatView || !composer) return;
+  chatView.addEventListener("click", (event) => {
+    if (!composer.classList.contains("editing-message") || composer.contains(event.target)) return;
+    if (event.target.closest("[data-edit-user-message]")) return;
+    cancelUserMessageEdit();
+  });
 }
 
 function bindSpeechButtons() {
@@ -362,6 +411,17 @@ async function sendMessage(event) {
   if (state.sending) return;
   const form = event.currentTarget;
   const textarea = form.content;
+  const editMessageId = Number(form.dataset.editMessageId);
+  if (editMessageId) {
+    const content = textarea.value.trim();
+    const original = state.messages.find((message) => message.id === editMessageId)?.content || "";
+    if (!content || content === original) {
+      if (content === original) cancelUserMessageEdit();
+      return;
+    }
+    await rewriteUserMessage(editMessageId, content);
+    return;
+  }
   state.sending = true;
   await stopVoiceInteraction();
   const content = textarea.value.trim();
@@ -376,6 +436,12 @@ async function sendMessage(event) {
   const userMessage = { role: "user", content };
   state.messages.push(userMessage);
   const container = document.querySelector("#messages");
+  container.querySelectorAll("[data-edit-user-message]").forEach((bubble) => {
+    const staticBubble = document.createElement("div");
+    staticBubble.className = "bubble";
+    staticBubble.textContent = bubble.textContent;
+    bubble.replaceWith(staticBubble);
+  });
   const assistant = document.createElement("div");
   assistant.className = "message pending";
   assistant.innerHTML = `<div><div class="bubble">正在回应…</div><span class="stamp"></span></div>`;
@@ -387,7 +453,17 @@ async function sendMessage(event) {
     const result = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); }, null, state.activeConversation.id);
     userMessage.id = result.userMessageId;
     const userElement = container.querySelector(`.message.user:not([data-message-id]), .message.user[data-message-id=""]`);
-    if (userElement) userElement.dataset.messageId = String(result.userMessageId || "");
+    if (userElement) {
+      userElement.dataset.messageId = String(result.userMessageId || "");
+      const staticBubble = userElement.querySelector(".bubble");
+      const editButton = document.createElement("button");
+      editButton.className = "bubble user-bubble";
+      editButton.type = "button";
+      editButton.dataset.editUserMessage = "";
+      editButton.setAttribute("aria-label", "编辑并重新发送这条消息");
+      editButton.textContent = staticBubble.textContent;
+      staticBubble.replaceWith(editButton);
+    }
     if (state.messages.length === 1 && !state.activeConversation.titleCustom) {
       state.activeConversation.title = content.slice(0, 80);
       document.querySelector(".chat-meta span").textContent = state.activeConversation.title;
@@ -729,8 +805,9 @@ export async function openChat(id, onBack) {
 export function renderChat({ onBack }) {
   const character = state.active;
   const latestAssistantIndex = state.messages.reduce((latest, message, index) => message.role === "assistant" ? index : latest, -1);
-  const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex)).join("");
-  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong><span>${esc(state.activeConversation?.title || "新对话")}</span></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
+  const latestUserIndex = state.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
+  const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex, index === latestUserIndex)).join("");
+  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong><span>${esc(state.activeConversation?.title || "新对话")}</span></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
   document.querySelector("#back").onclick = async () => {
     await stopVoiceInteraction();
     onBack();
@@ -738,6 +815,9 @@ export function renderChat({ onBack }) {
   document.querySelector("#call").onclick = startPhone;
   bindHistory();
   document.querySelector("#composer").onsubmit = sendMessage;
+  const cancelButton = document.querySelector(".composer-edit-cancel");
+  cancelButton.onmousedown = (event) => event.preventDefault();
+  cancelButton.onclick = cancelUserMessageEdit;
   const composer = document.querySelector("#composer textarea");
   composer.onkeydown = handleComposerKeydown;
   composer.oninput = () => {
@@ -747,6 +827,7 @@ export function renderChat({ onBack }) {
   resizeComposer(composer);
   updateComposerState(composer);
   document.querySelector("#dictate").onclick = toggleDictation;
+  bindComposerOutsideClick();
   bindSettings(onBack);
   bindSpeechButtons();
   bindMessageActions();

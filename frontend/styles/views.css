@@ -807,23 +807,6 @@
   box-shadow: 0 0 0 3px rgb(216 243 93 / 10%);
 }
 
-.message-edit-form {
-  display: grid;
-  gap: 8px;
-  min-width: min(100%, 340px);
-}
-
-.message-edit-form .text-area {
-  min-height: 86px;
-  background: var(--surface-raised);
-}
-
-.message-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 7px;
-}
-
 .profile-card h2 {
   margin: 0 0 5px;
   font-size: 17px;
@@ -1015,6 +998,7 @@
 }
 
 .composer {
+  position: relative;
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr) 50px;
   align-items: end;
@@ -1025,8 +1009,74 @@
   transition: grid-template-columns 180ms ease;
 }
 
+.composer-edit-header {
+  display: none;
+}
+
 .composer.send-hidden {
   grid-template-columns: 50px minmax(0, 1fr) 0;
+}
+
+.chat-view.editing-message .messages {
+  opacity: .56;
+}
+
+.composer.editing-message {
+  grid-template-columns: minmax(0, 1fr) 50px;
+  padding-top: 38px;
+  border-top-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.composer.editing-message .composer-edit-header {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 13px 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.composer-edit-cancel {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+.composer-edit-cancel:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.composer-edit-cancel svg {
+  width: 15px;
+  height: 15px;
+}
+
+.composer.editing-message #dictate {
+  display: none;
+}
+
+.composer.editing-message textarea.text-area:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(216 243 93 / 8%);
+}
+
+.composer.editing-message.is-updating textarea {
+  opacity: .55;
+  pointer-events: none;
+}
+
+.composer.editing-message.send-hidden {
+  grid-template-columns: minmax(0, 1fr) 0;
 }
 
 .composer textarea {
@@ -1063,6 +1113,10 @@
   visibility: hidden;
   pointer-events: none;
   transition: opacity 100ms ease, visibility 0s linear 180ms;
+}
+
+.composer.restore-composer-state .composer-button.send {
+  transition: none;
 }
 
 .composer-button.recording {

@@ -161,8 +161,8 @@ def character_instructions(character, language=None):
 def language_constraint(language):
     language = normalize_prompt_language(language)
     if language == "en":
-        return "ENGLISH ONLY. Write every response entirely in English, even when the user writes in Chinese or another language. Do not translate, mirror, or switch languages. Keep non-English names, quotations, abbreviations, code, and URLs only when necessary for accuracy."
-    return "仅使用中文。每次回答都必须完全使用中文，即使对话者使用英文或其他语言。不要翻译、模仿或切换回答语言；仅在准确表达确有需要时保留外文名称、引用、缩写、代码或 URL。"
+        return "Speak English only. Every audible reply and every live transcript must be entirely in English, regardless of the user's language or any language in the character profile. Never switch to Chinese or mirror the user's language. Do not translate before answering. Keep non-English names, code, URLs, or very short quotations only when strictly necessary for accuracy."
+    return "只用中文回答。无论对话者说什么语言、角色设定中出现什么语言，所有可听见的回复和实时转写都必须使用简体中文。绝不因为对话者使用英文而改用英文，也不要先翻译再回答。只有专有名词、代码、URL 或准确性确实需要时，才保留极短的外文片段。"
 
 
 def build_agent_instructions(character, include_stage_directions=True):
@@ -964,6 +964,13 @@ def stream_character_response(
                     if current_tail != expected_tail_id:
                         database.rollback()
                         raise RuntimeError("该对话已发生变化，请刷新后重试")
+                    latest_user_message_id = database.execute(
+                        "SELECT MAX(id) AS id FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'user'",
+                        (conversation_id, session["user_id"]),
+                    ).fetchone()["id"]
+                    if latest_user_message_id != rewrite_message_id:
+                        database.rollback()
+                        raise RuntimeError("只能编辑该对话中最新发送的消息")
                     target = database.execute(
                         """
                         SELECT id, role FROM messages
@@ -1103,6 +1110,12 @@ def rewrite_message(character_id, message_id):
     ).fetchone()
     if target is None or target["conversation_id"] is None:
         return jsonify(error="未找到可编辑的用户消息"), 404
+    latest_user_message_id = get_db().execute(
+        "SELECT MAX(id) AS id FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'user'",
+        (target["conversation_id"], session["user_id"]),
+    ).fetchone()["id"]
+    if latest_user_message_id != message_id:
+        return jsonify(error="只能编辑该对话中最新发送的消息"), 409
     tail = get_db().execute(
         "SELECT MAX(id) AS id FROM messages WHERE conversation_id = ? AND user_id = ?",
         (target["conversation_id"], session["user_id"]),

@@ -24,8 +24,8 @@ load_dotenv()
 
 DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 REALTIME_SPEAKING_STYLES = {
-    "zh": "请以自然、富有表现力的方式说话，贴合对话中的情绪变化，避免像照稿朗读或刻意进行舞台表演。",
-    "en": "Speak naturally and expressively, matching the conversation's emotional tone without sounding scripted or theatrical.",
+    "zh": "请自然地说话，符合当前语境和情绪，不要过度夸张或戏剧化。",
+    "en": "Speak naturally, matching the context and emotion without sounding exaggerated or theatrical.",
 }
 SPEAKING_STYLE_LABELS = {"zh": "说话方式", "en": "Speaking style"}
 logger = logging.getLogger("sparkchat.realtime")

@@ -341,7 +341,7 @@ class SparkChatApiTest(unittest.TestCase):
             "language": "zh",
         })
         self.assertLess(final_prompt.index("身份背景: 身份设定"), final_prompt.index("回答要求："))
-        self.assertEqual(final_prompt.count("仅使用中文。"), 1)
+        self.assertEqual(final_prompt.count("实时通话语言硬性规则：只用中文回答"), 1)
         self.assertNotIn("用户记忆", final_prompt)
 
     def test_character_prompt_encourages_natural_varied_responses(self):
@@ -387,9 +387,9 @@ class SparkChatApiTest(unittest.TestCase):
             "persona": "Calm and direct.",
             "language": "en",
         })
-        self.assertTrue(english_instructions.startswith("ENGLISH ONLY."))
-        self.assertIn("even when the user writes in Chinese or another language", english_instructions)
-        self.assertIn("Do not translate, mirror, or switch languages", english_instructions)
+        self.assertTrue(english_instructions.startswith("REAL-TIME CALL LANGUAGE HARD RULE:"))
+        self.assertIn("regardless of the user's language", english_instructions)
+        self.assertIn("Never switch to Chinese or mirror the user's language", english_instructions)
 
     def test_agent_instructions_accept_sqlite_rows(self):
         import sqlite3
@@ -405,8 +405,8 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertIn("Character name: 测试角色", instructions)
         self.assertIn("Response requirements:", instructions)
-        self.assertIn("Write every response entirely in English", instructions)
-        self.assertIn("even when the user writes in Chinese or another language", instructions)
+        self.assertIn("Every audible reply and every live transcript must be entirely in English", instructions)
+        self.assertIn("regardless of the user's language", instructions)
 
     def test_session_cookie_survives_new_client(self):
         self.login()
@@ -532,7 +532,10 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(payload["tts"]["speaker"], "ICL_uranus_6a6d9cd9d9b89695")
         self.assertEqual(payload["dialog"]["extra"]["model"], "2.1.0.0")
-        self.assertEqual(payload["dialog"]["system_role"], "Use English.")
+        self.assertEqual(
+            payload["dialog"]["system_role"],
+            "Use English.",
+        )
         self.assertEqual(payload["dialog"]["speaking_style"], "Speak as a controlled commander.")
 
     def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
@@ -558,15 +561,17 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(config["speakingStyle"], REALTIME_SPEAKING_STYLES["en"])
         self.assertIn("Character name: Megatron", config["instructions"])
         self.assertIn("Identity and background: Identity", config["instructions"])
-        self.assertIn("Speaking style: Speak naturally", payload["dialog"]["character_manifest"])
+        self.assertIn("Speaking style: Speak naturally, matching the context and emotion", payload["dialog"]["character_manifest"])
         self.assertNotIn("角色名称", config["instructions"])
         self.assertNotIn("说话方式", payload["dialog"]["character_manifest"])
-        self.assertIn("Speak naturally and expressively", payload["dialog"]["character_manifest"])
+        self.assertIn("REAL-TIME CALL LANGUAGE HARD RULE: Speak English only.", payload["dialog"]["character_manifest"])
+        self.assertEqual(payload["dialog"]["character_manifest"].count("REAL-TIME CALL LANGUAGE HARD RULE"), 1)
+        self.assertIn("without sounding exaggerated or theatrical", payload["dialog"]["character_manifest"])
         self.assertNotIn("Stage directions", payload["dialog"]["character_manifest"])
         self.assertNotIn("most natural position", payload["dialog"]["character_manifest"])
-        self.assertTrue(config["instructions"].startswith("ENGLISH ONLY."))
-        self.assertIn("even when the user writes in Chinese or another language", config["instructions"])
-        self.assertIn("Do not translate, mirror, or switch languages", config["instructions"])
+        self.assertTrue(config["instructions"].startswith("REAL-TIME CALL LANGUAGE HARD RULE:"))
+        self.assertIn("regardless of the user's language", config["instructions"])
+        self.assertIn("Never switch to Chinese or mirror the user's language", config["instructions"])
 
     def test_realtime_and_text_chat_share_core_language_and_character_rules(self):
         from backend.app import build_agent_instructions, realtime_character_config
@@ -584,30 +589,30 @@ class SparkChatApiTest(unittest.TestCase):
         for shared_rule in ("角色名称: 测试角色", "身份背景: 沉着、可靠。"):
             self.assertIn(shared_rule, text_instructions)
             self.assertIn(shared_rule, realtime_config["instructions"])
-        self.assertIn("仅使用中文。每次回答都必须完全使用中文", text_instructions)
-        self.assertIn("仅使用中文。每次回答都必须完全使用中文", realtime_config["instructions"])
+        self.assertIn("实时通话语言硬性规则：只用中文回答", text_instructions)
+        self.assertIn("实时通话语言硬性规则：只用中文回答", realtime_config["instructions"])
         self.assertIn("可选表现", text_instructions)
         self.assertNotIn("可选表现", realtime_config["instructions"])
         self.assertNotIn("放在对话自然发生的位置", realtime_config["instructions"])
-        self.assertTrue(realtime_config["instructions"].startswith("仅使用中文。"))
-        self.assertIn("不要翻译、模仿或切换回答语言", realtime_config["instructions"])
+        self.assertTrue(realtime_config["instructions"].startswith("实时通话语言硬性规则："))
+        self.assertIn("绝不因为对话者使用英文而改用英文", realtime_config["instructions"])
 
         other_character = {**character, "name": "另一个角色", "persona": "活泼、坦率。", "language": "en"}
         self.assertNotEqual(
             realtime_config["speakingStyle"],
             realtime_character_config(other_character)["speakingStyle"],
         )
-        self.assertEqual(realtime_config["speakingStyle"], "请以自然、富有表现力的方式说话，贴合对话中的情绪变化，避免像照稿朗读或刻意进行舞台表演。")
+        self.assertEqual(realtime_config["speakingStyle"], "请自然地说话，符合当前语境和情绪，不要过度夸张或戏剧化。")
 
         fallback_character = {**character, "language": "ja"}
         fallback_config = realtime_character_config(fallback_character)
         fallback_payload = session_payload({"speakerId": "S_test_voice", **fallback_config})
         self.assertEqual(fallback_config["language"], "zh")
-        self.assertTrue(fallback_config["instructions"].startswith("仅使用中文。"))
+        self.assertTrue(fallback_config["instructions"].startswith("实时通话语言硬性规则："))
         self.assertIn("角色名称: 测试角色", fallback_config["instructions"])
         self.assertIn("身份背景: 沉着、可靠。", fallback_config["instructions"])
         self.assertIn("回答要求：", fallback_config["instructions"])
-        self.assertIn("说话方式: 请以自然", fallback_payload["dialog"]["character_manifest"])
+        self.assertIn("说话方式: 请自然地说话，符合当前语境和情绪", fallback_payload["dialog"]["character_manifest"])
 
     def test_character_model_is_used_for_text_generation(self):
         from backend import app as token_server
@@ -707,7 +712,7 @@ class SparkChatApiTest(unittest.TestCase):
         finally:
             token_server.ark.responses = original_responses
 
-    def test_edit_user_message_rewrites_history_atomically(self):
+    def test_edit_latest_user_message_rewrites_history_atomically(self):
         from backend import app as token_server
 
         class Delta:
@@ -743,18 +748,53 @@ class SparkChatApiTest(unittest.TestCase):
                 database.execute("UPDATE conversations SET title = '旧问题' WHERE id = ?", (conversation_id,))
                 database.commit()
             response = self.client.post(
-                f"/api/characters/1/messages/{ids[0]}/rewrite",
+                f"/api/characters/1/messages/{ids[2]}/rewrite",
                 json={"content": "编辑后的问题"},
             )
             self.assertEqual(response.status_code, 200)
             events = b"".join(response.response).decode("utf-8")
             self.assertIn('"type": "done"', events)
             messages = self.client.get(f"/api/characters/1/conversations/{conversation_id}/messages").json["messages"]
-            self.assertEqual([message["content"] for message in messages], ["编辑后的问题", "新的回复"])
-            self.assertEqual(messages[0]["id"], ids[0])
-            self.assertEqual(self.client.get(f"/api/characters/1/conversations").json["conversations"][0]["title"], "编辑后的问题")
+            self.assertEqual(
+                [message["content"] for message in messages],
+                ["旧问题", "旧回复", "编辑后的问题", "新的回复"],
+            )
+            self.assertEqual(messages[2]["id"], ids[2])
+            self.assertEqual(self.client.get(f"/api/characters/1/conversations").json["conversations"][0]["title"], "旧问题")
         finally:
             token_server.ark.responses = original_responses
+
+    def test_edit_older_user_message_is_rejected(self):
+        from backend import app as token_server
+
+        self.login()
+        conversation = self.client.post("/api/characters/1/conversations").json["conversation"]
+        conversation_id = conversation["id"]
+        with self.app.app_context():
+            database = token_server.get_db()
+            message_ids = []
+            for role, content in (("user", "旧问题"), ("assistant", "旧回复"), ("user", "最新问题")):
+                cursor = database.execute(
+                    "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (1, 1, ?, ?, ?)",
+                    (conversation_id, role, content),
+                )
+                message_ids.append(cursor.lastrowid)
+            database.commit()
+
+        response = self.client.post(
+            f"/api/characters/1/messages/{message_ids[0]}/rewrite",
+            json={"content": "不应保存的编辑"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json["error"], "只能编辑该对话中最新发送的消息")
+        messages = self.client.get(
+            f"/api/characters/1/conversations/{conversation_id}/messages"
+        ).json["messages"]
+        self.assertEqual(
+            [message["content"] for message in messages],
+            ["旧问题", "旧回复", "最新问题"],
+        )
 
     def test_translation_uses_seed_model_and_cache(self):
         from backend import app as token_server
@@ -892,7 +932,7 @@ class SparkChatApiTest(unittest.TestCase):
         payload = session_payload({"speakerId": "S_custom", **config})
 
         self.assertNotIn("机械统帅", payload["dialog"]["character_manifest"])
-        self.assertIn("仅使用中文。每次回答都必须完全使用中文", config["instructions"])
+        self.assertIn("实时通话语言硬性规则：只用中文回答", config["instructions"])
 
     def test_realtime_and_tts_use_same_character_speaker(self):
         from backend import app as token_server

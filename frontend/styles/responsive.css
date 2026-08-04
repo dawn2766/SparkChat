@@ -140,6 +140,14 @@
     grid-template-columns: 46px minmax(0, 1fr) 0;
   }
 
+  .composer.editing-message {
+    grid-template-columns: minmax(0, 1fr) 46px;
+  }
+
+  .composer.editing-message.send-hidden {
+    grid-template-columns: minmax(0, 1fr) 0;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
