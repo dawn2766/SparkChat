@@ -568,6 +568,128 @@ class SparkChatApiTest(unittest.TestCase):
         finally:
             token_server.ark.responses = original_responses
 
+    def test_translation_uses_seed_model_and_cache(self):
+        from backend import app as token_server
+
+        calls = []
+
+        class FakeResponse:
+            output_text = "This is the translated reply."
+
+        class FakeResponses:
+            @staticmethod
+            def create(**kwargs):
+                calls.append(kwargs)
+                return FakeResponse()
+
+        with self.app.app_context():
+            database = token_server.get_db()
+            database.execute(
+                "INSERT INTO messages (user_id, character_id, role, content) VALUES (1, 1, 'assistant', '这是一条回复。')"
+            )
+            message_id = database.execute("SELECT last_insert_rowid()").fetchone()[0]
+            database.commit()
+        original_responses = token_server.ark.responses
+        token_server.ark.responses = FakeResponses()
+        try:
+            self.login()
+            path = f"/api/characters/1/messages/{message_id}/translate"
+            first = self.client.post(path)
+            second = self.client.post(path)
+            self.assertEqual(first.status_code, 200)
+            self.assertFalse(first.json["cached"])
+            self.assertTrue(second.json["cached"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["model"], "doubao-seed-2-1-pro-260615")
+            self.assertIn("只输出目标回复的完整译文", calls[0]["instructions"])
+        finally:
+            token_server.ark.responses = original_responses
+
+    def test_message_speech_cache_hits_and_regeneration_invalidates_both_caches(self):
+        from backend import app as token_server
+
+        calls = []
+
+        class FakeSpeech:
+            configured = True
+
+            @staticmethod
+            def synthesize(_voice_id, text, _language):
+                calls.append(text)
+                return f"audio-{len(calls)}".encode(), "audio/mpeg"
+
+        original_client = token_server.doubao_speech
+        token_server.doubao_speech = FakeSpeech()
+        try:
+            with self.app.app_context():
+                database = token_server.get_db()
+                database.execute(
+                    "INSERT INTO messages (user_id, character_id, role, content) VALUES (1, 1, 'assistant', 'Original reply')"
+                )
+                message_id = database.execute("SELECT last_insert_rowid()").fetchone()[0]
+                database.commit()
+            self.login()
+            path = f"/api/characters/1/messages/{message_id}/speak"
+            first = self.client.post(path, json={"text": "Original reply"})
+            second = self.client.post(path, json={"text": "Original reply"})
+            self.assertEqual(first.data, b"audio-1")
+            self.assertEqual(second.data, b"audio-1")
+            self.assertEqual(len(calls), 1)
+            with self.app.app_context():
+                database = token_server.get_db()
+                database.execute(
+                    "INSERT INTO translation_cache (user_id, message_id, translated_text) VALUES (1, ?, 'Original translation')",
+                    (message_id,),
+                )
+                database.commit()
+            translated_audio = self.client.post(path, json={"text": "Original translation"})
+            self.assertEqual(translated_audio.data, b"audio-2")
+            self.assertEqual(len(calls), 2)
+            with self.app.app_context():
+                database = token_server.get_db()
+                database.execute("UPDATE messages SET content = 'Regenerated reply' WHERE id = ?", (message_id,))
+                token_server.invalidate_message_cache(message_id, user_id=1)
+                database.commit()
+                self.assertIsNone(database.execute("SELECT 1 FROM translation_cache WHERE message_id = ?", (message_id,)).fetchone())
+                self.assertIsNone(database.execute("SELECT 1 FROM speech_cache WHERE message_id = ?", (message_id,)).fetchone())
+        finally:
+            token_server.doubao_speech = original_client
+
+    def test_each_user_cache_keeps_only_latest_twenty_entries(self):
+        from backend import app as token_server
+
+        with self.app.app_context():
+            database = token_server.get_db()
+            message_ids = []
+            for index in range(21):
+                cursor = database.execute(
+                    "INSERT INTO messages (user_id, character_id, role, content) VALUES (1, 1, 'assistant', ?)",
+                    (f"cache-message-{index}",),
+                )
+                message_ids.append(cursor.lastrowid)
+                database.execute(
+                    "INSERT INTO translation_cache (user_id, message_id, translated_text, created_at) VALUES (1, ?, ?, ?)",
+                    (cursor.lastrowid, f"translation-{index}", f"2000-01-01 00:00:{index:02d}"),
+                )
+                database.execute(
+                    "INSERT INTO speech_cache (user_id, message_id, cache_key, audio, content_type, created_at) VALUES (1, ?, ?, ?, 'audio/mpeg', ?)",
+                    (cursor.lastrowid, f"key-{index}", b"audio", f"2000-01-01 00:00:{index:02d}"),
+                )
+            token_server.trim_user_cache("translation_cache", user_id=1)
+            token_server.trim_user_cache("speech_cache", user_id=1)
+            database.commit()
+            translations = database.execute(
+                "SELECT message_id FROM translation_cache WHERE user_id = 1 ORDER BY created_at"
+            ).fetchall()
+            speeches = database.execute(
+                "SELECT message_id FROM speech_cache WHERE user_id = 1 ORDER BY created_at"
+            ).fetchall()
+
+        self.assertEqual(len(translations), 20)
+        self.assertEqual(len(speeches), 20)
+        self.assertNotIn(message_ids[0], [row["message_id"] for row in translations])
+        self.assertNotIn(message_ids[0], [row["message_id"] for row in speeches])
+
     def test_custom_cloned_voice_does_not_get_megatron_delivery(self):
         from backend.realtime_server import session_payload
         from backend.app import realtime_character_config

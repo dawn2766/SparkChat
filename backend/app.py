@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import re
 import secrets
@@ -101,6 +102,16 @@ SYSTEM_PROMPTS = {
     for language, prompt in CORE_SYSTEM_PROMPTS.items()
 }
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
+TRANSLATION_MODEL = os.getenv("ARK_TRANSLATION_MODEL", "doubao-seed-2-1-pro-260628")
+TRANSLATION_PROMPT = """你是一名专业的中英双语本地化译者。请根据提供的对话语境，准确翻译指定的数字角色回复。
+
+要求：
+1. 自主判断主要语言：中文译为自然、地道的英文；英文译为准确、流畅的简体中文。若包含少量另一语言，仍按主要语言决定目标语言。
+2. 结合上下文消解指代、歧义、语气和隐含含义，保持角色身份、情绪、礼貌程度、修辞力度与说话风格，不擅自补充、删减、解释或弱化内容。
+3. 专有名词、角色名、世界观术语、引文和固定表达应采用通行译法；没有可靠通行译法时保留原文或做自然音译。
+4. 保留原文的段落、列表、Markdown、代码、数字和简短舞台提示的结构；不要翻译代码、URL、变量名或不可翻译标识符。
+5. 只输出目标回复的完整译文，不要输出说明、标签、引号、语言判断、备选译法或原文。
+"""
 CHARACTER_PROMPT_LABELS = {
     "zh": {"name": "角色名称", "persona": "身份背景"},
     "en": {"name": "Character name", "persona": "Identity and background"},
@@ -238,6 +249,27 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS translation_cache (
+            user_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            translated_text TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, message_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS speech_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            cache_key TEXT NOT NULL,
+            audio BLOB NOT NULL,
+            content_type TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, message_id, cache_key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+        );
         """
     )
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
@@ -248,6 +280,25 @@ def init_db():
         database.execute("ALTER TABLE character_overrides ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''")
     if "language" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+    speech_cache_columns = {row["name"] for row in database.execute("PRAGMA table_info(speech_cache)").fetchall()}
+    if speech_cache_columns and "cache_key" not in speech_cache_columns:
+        database.execute("DROP TABLE speech_cache")
+        database.execute(
+            """
+            CREATE TABLE speech_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                cache_key TEXT NOT NULL,
+                audio BLOB NOT NULL,
+                content_type TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, message_id, cache_key),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            )
+            """
+        )
     removed_preset_ids = [
         row["id"]
         for row in database.execute(
@@ -572,6 +623,47 @@ def list_messages(character_id):
     return jsonify(messages=[dict(row) for row in rows])
 
 
+def get_assistant_message(character_id, message_id):
+    return get_db().execute(
+        """
+        SELECT id, content FROM messages
+        WHERE id = ? AND user_id = ? AND character_id = ? AND role = 'assistant'
+        """,
+        (message_id, session["user_id"], character_id),
+    ).fetchone()
+
+
+def trim_user_cache(table_name, user_id=None):
+    if table_name not in {"translation_cache", "speech_cache"}:
+        raise ValueError("Unsupported cache table")
+    user_id = user_id if user_id is not None else session["user_id"]
+    get_db().execute(
+        f"""
+        DELETE FROM {table_name}
+        WHERE user_id = ? AND rowid NOT IN (
+            SELECT rowid FROM {table_name}
+            WHERE user_id = ?
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 20
+        )
+        """,
+        (user_id, user_id),
+    )
+
+
+def invalidate_message_cache(message_id, user_id=None):
+    user_id = user_id if user_id is not None else session["user_id"]
+    database = get_db()
+    database.execute(
+        "DELETE FROM translation_cache WHERE user_id = ? AND message_id = ?",
+        (user_id, message_id),
+    )
+    database.execute(
+        "DELETE FROM speech_cache WHERE user_id = ? AND message_id = ?",
+        (user_id, message_id),
+    )
+
+
 def stream_character_response(character, history, replace_message_id=None):
     @stream_with_context
     def generate():
@@ -602,6 +694,7 @@ def stream_character_response(character, history, replace_message_id=None):
                         "UPDATE messages SET content = ?, created_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
                         (final_text, replace_message_id, session["user_id"]),
                     )
+                    invalidate_message_cache(replace_message_id)
                 get_db().commit()
             yield f"data: {json.dumps({'type': 'done', 'messageId': message_id}, ensure_ascii=False)}\n\n"
         except Exception as error:
@@ -661,27 +754,142 @@ def regenerate_message(character_id, message_id):
     return stream_character_response(character, history, replace_message_id=message_id)
 
 
-@app.post("/api/characters/<int:character_id>/speak")
+@app.post("/api/characters/<int:character_id>/messages/<int:message_id>/translate")
 @login_required
-def speak_message(character_id):
-    character = get_character(character_id)
-    payload = request.get_json(silent=True) or {}
-    text = payload.get("text", "").strip()
-    spoken_text, _expressive_text, _cues = prepare_speech_text(text)
-    if character is None:
+def translate_message(character_id, message_id):
+    if get_character(character_id) is None:
         return jsonify(error="未找到该角色"), 404
+    message = get_assistant_message(character_id, message_id)
+    if message is None:
+        return jsonify(error="未找到可翻译的回复"), 404
+    cached = get_db().execute(
+        "SELECT translated_text FROM translation_cache WHERE user_id = ? AND message_id = ?",
+        (session["user_id"], message_id),
+    ).fetchone()
+    if cached is not None:
+        return jsonify(translation=cached["translated_text"], cached=True)
+
+    context = get_db().execute(
+        """
+        SELECT role, content FROM messages
+        WHERE user_id = ? AND character_id = ? AND id <= ?
+        ORDER BY id DESC LIMIT 8
+        """,
+        (session["user_id"], character_id, message_id),
+    ).fetchall()[::-1]
+    try:
+        response = ark.responses.create(
+            model=TRANSLATION_MODEL,
+            instructions=TRANSLATION_PROMPT,
+            input=[
+                {
+                    "role": "user",
+                    "content": "对话语境：\n"
+                    + "\n".join(
+                        f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
+                        for row in context[:-1]
+                    )
+                    + f"\n\n待翻译的数字角色回复：\n{message['content']}",
+                }
+            ],
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        translation = (getattr(response, "output_text", "") or "").strip()
+    except Exception:
+        app.logger.exception("Message translation failed")
+        return jsonify(error="翻译服务暂时不可用，请稍后重试"), 502
+    if not translation:
+        return jsonify(error="翻译服务未返回有效内容"), 502
+
+    database = get_db()
+    database.execute(
+        """
+        INSERT INTO translation_cache (user_id, message_id, translated_text)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id, message_id) DO UPDATE SET
+            translated_text = excluded.translated_text,
+            created_at = CURRENT_TIMESTAMP
+        """,
+        (session["user_id"], message_id, translation),
+    )
+    trim_user_cache("translation_cache")
+    database.commit()
+    return jsonify(translation=translation, cached=False)
+
+
+def synthesize_speech_response(character, text, message_id=None):
+    spoken_text, _expressive_text, _cues = prepare_speech_text(text)
     voice_id = doubao_speaker_id(character)
     if not spoken_text or len(spoken_text) > 5000:
         return jsonify(error="朗读内容需为 1 至 5000 个字符"), 400
+    cache_key = None
+    if message_id is not None:
+        cache_key = hashlib.sha256(
+            f"{voice_id}\0{character['language']}\0{text}".encode("utf-8")
+        ).hexdigest()
+        cached = get_db().execute(
+            "SELECT audio, content_type FROM speech_cache WHERE user_id = ? AND message_id = ? AND cache_key = ?",
+            (session["user_id"], message_id, cache_key),
+        ).fetchone()
+        if cached is not None:
+            return Response(cached["audio"], mimetype=cached["content_type"], headers={"Cache-Control": "private, no-cache", "X-SparkChat-Cache": "HIT"})
     if not doubao_speech.configured:
         return jsonify(error="服务器尚未配置豆包语音", actionUrl=SPEECH_CONSOLE_URL), 503
     if not voice_id:
         return jsonify(error="该角色尚未绑定真实音色，请先在服务器配置 voice ID"), 503
     try:
         audio, content_type = doubao_speech.synthesize(voice_id, text, character["language"])
-        return Response(audio, mimetype=content_type, headers={"Cache-Control": "no-store"})
+        if message_id is not None:
+            database = get_db()
+            database.execute(
+                """
+                INSERT INTO speech_cache (user_id, message_id, cache_key, audio, content_type)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, message_id, cache_key) DO UPDATE SET
+                    audio = excluded.audio, content_type = excluded.content_type,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (session["user_id"], message_id, cache_key, audio, content_type),
+            )
+            trim_user_cache("speech_cache")
+            database.commit()
+        cache_state = "MISS" if message_id is not None else "BYPASS"
+        return Response(audio, mimetype=content_type, headers={"Cache-Control": "private, no-cache", "X-SparkChat-Cache": cache_state})
     except DoubaoSpeechError as error:
         return speech_error_response(error, "合成")
+
+
+@app.post("/api/characters/<int:character_id>/messages/<int:message_id>/speak")
+@login_required
+def speak_message(character_id, message_id):
+    character = get_character(character_id)
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    message = get_assistant_message(character_id, message_id)
+    if message is None:
+        return jsonify(error="未找到可朗读的回复"), 404
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text", message["content"])).strip()
+    allowed_texts = {message["content"].strip()}
+    translation = get_db().execute(
+        "SELECT translated_text FROM translation_cache WHERE user_id = ? AND message_id = ?",
+        (session["user_id"], message_id),
+    ).fetchone()
+    if translation is not None:
+        allowed_texts.add(translation["translated_text"].strip())
+    if text not in allowed_texts:
+        return jsonify(error="朗读内容与当前回复不匹配"), 409
+    return synthesize_speech_response(character, text, message_id)
+
+
+@app.post("/api/characters/<int:character_id>/speak")
+@login_required
+def speak_text(character_id):
+    character = get_character(character_id)
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    payload = request.get_json(silent=True) or {}
+    return synthesize_speech_response(character, str(payload.get("text", "")).strip())
 
 
 @app.get("/api/token")

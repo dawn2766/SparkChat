@@ -1,4 +1,4 @@
-import { createIcons, Copy, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { createIcons, Copy, Languages, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
@@ -6,7 +6,7 @@ import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
-const refreshIcons = () => createIcons({ icons: { Copy, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } });
+const refreshIcons = () => createIcons({ icons: { Copy, Languages, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -77,7 +77,7 @@ function resetTextareaSize(textarea) {
 
 function messageActionsMarkup(message, isAssistant) {
   if (!isAssistant) return "";
-  return `<span class="message-actions"><button class="message-action" data-copy="${esc(message.content)}" aria-label="复制${isAssistant ? "这条回复" : "这条消息"}"><i data-lucide="copy"></i></button>${isAssistant ? `<button class="message-action" data-regenerate="${message.id || ""}" aria-label="重新生成这条回复"><i data-lucide="refresh-cw"></i></button><button class="speak-button" data-speak="${esc(message.content)}" aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button>` : ""}</span>`;
+  return `<span class="message-actions"><button class="message-action" data-copy aria-label="复制这条回复"><i data-lucide="copy"></i></button><button class="message-action translate-button" data-translate="${message.id || ""}" aria-label="翻译这条回复"><i data-lucide="languages"></i></button><button class="message-action" data-regenerate="${message.id || ""}" aria-label="重新生成这条回复"><i data-lucide="refresh-cw"></i></button><button class="speak-button" data-speak aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
 }
 
 function assistantStampMarkup(message, character) {
@@ -87,12 +87,12 @@ function assistantStampMarkup(message, character) {
 function messageMarkup(message, character) {
   const isAssistant = message.role === "assistant";
   const stamp = isAssistant ? assistantStampMarkup(message, character) : messageActionsMarkup(message, false);
-  return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
+  return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}" data-original-content="${esc(message.content)}"><div class="message-content"><div class="bubble">${esc(message.content)}</div>${stamp}</div></div>`;
 }
 
 function bindSpeechButtons() {
   document.querySelectorAll("[data-speak]").forEach((button) => {
-    button.onclick = () => speak(button.dataset.speak, button);
+    button.onclick = () => speak(button.closest(".message")?.querySelector(".bubble")?.textContent || "", button);
   });
   refreshIcons();
 }
@@ -104,10 +104,38 @@ function bindMessageActions() {
     const copyButton = event.target.closest("[data-copy]");
     if (copyButton) {
       try {
-        await navigator.clipboard.writeText(copyButton.dataset.copy);
+        await navigator.clipboard.writeText(copyButton.closest(".message").querySelector(".bubble").textContent);
         notify("已复制");
       } catch (_error) {
         notify("复制失败，请检查浏览器剪贴板权限");
+      }
+      return;
+    }
+    const translateButton = event.target.closest("[data-translate]");
+    if (translateButton?.dataset.translate) {
+      if (translateButton.disabled || state.sending) return;
+      const message = translateButton.closest(".message");
+      const bubble = message.querySelector(".bubble");
+      if (message.dataset.translated === "true") {
+        stopSpeechAudio();
+        bubble.textContent = message.dataset.originalContent;
+        message.dataset.translated = "false";
+        translateButton.setAttribute("aria-label", "翻译这条回复");
+        translateButton.classList.remove("active");
+        return;
+      }
+      translateButton.disabled = true;
+      try {
+        const result = await api(`/api/characters/${state.active.id}/messages/${translateButton.dataset.translate}/translate`, { method: "POST" });
+        bubble.textContent = result.translation;
+        message.dataset.translated = "true";
+        translateButton.setAttribute("aria-label", "显示原文");
+        translateButton.classList.add("active");
+        stopSpeechAudio();
+      } catch (error) {
+        notify(error.message);
+      } finally {
+        translateButton.disabled = false;
       }
       return;
     }
@@ -117,9 +145,15 @@ function bindMessageActions() {
     const message = regenerateButton.closest(".message");
     const bubble = message.querySelector(".bubble");
     const oldText = bubble.textContent;
+    const oldOriginalContent = message.dataset.originalContent || oldText;
     state.sending = true;
     regenerateButton.disabled = true;
     message.classList.add("pending");
+    message.dataset.translated = "false";
+    message.dataset.originalContent = oldOriginalContent;
+    const regenerateTranslateButton = message.querySelector("[data-translate]");
+    regenerateTranslateButton?.classList.remove("active");
+    regenerateTranslateButton?.setAttribute("aria-label", "翻译这条回复");
     try {
       const result = await streamChat(state.active.id, "", (partial) => {
         bubble.textContent = partial;
@@ -130,12 +164,15 @@ function bindMessageActions() {
       message.dataset.messageId = result.messageId;
       const index = state.messages.findIndex((item) => item.id === Number(result.messageId));
       if (index >= 0) state.messages[index].content = result.answer;
-      message.querySelector("[data-speak]").dataset.speak = result.answer;
-      message.querySelector("[data-copy]").dataset.copy = result.answer;
+      message.dataset.originalContent = result.answer;
       message.classList.remove("pending");
       notify("已生成新的回复");
     } catch (error) {
       bubble.textContent = oldText;
+      const wasTranslated = oldText !== oldOriginalContent;
+      message.dataset.translated = wasTranslated ? "true" : "false";
+      regenerateTranslateButton?.classList.toggle("active", wasTranslated);
+      regenerateTranslateButton?.setAttribute("aria-label", wasTranslated ? "显示原文" : "翻译这条回复");
       notify(error.message);
     } finally {
       state.sending = false;
@@ -162,7 +199,11 @@ async function speak(text, button = null) {
   updateSpeechButton(button, true);
   try {
     speechRequest = new AbortController();
-    const response = await fetch(apiUrl(`/api/characters/${state.active.id}/speak`), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }), signal: speechRequest.signal });
+    const messageId = button?.closest(".message")?.dataset.messageId;
+    const path = messageId
+      ? `/api/characters/${state.active.id}/messages/${messageId}/speak`
+      : `/api/characters/${state.active.id}/speak`;
+    const response = await fetch(apiUrl(path), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }), signal: speechRequest.signal });
     speechRequest = null;
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));

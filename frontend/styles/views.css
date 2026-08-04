@@ -724,6 +724,7 @@
 
 .message-action:disabled { opacity: .45; }
 .message-action svg { width: 13px; height: 13px; }
+.message-action.active { color: var(--accent); }
 
 .speak-button {
   width: 22px;
