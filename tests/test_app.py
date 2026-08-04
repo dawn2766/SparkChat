@@ -290,6 +290,7 @@ class SparkChatApiTest(unittest.TestCase):
             "language": "zh",
         })
         self.assertLess(final_prompt.index("身份背景：身份设定"), final_prompt.index("回答要求："))
+        self.assertEqual(final_prompt.count("强制语言规则："), 1)
         self.assertNotIn("用户记忆", final_prompt)
 
     def test_character_prompt_requires_stage_directions_for_performative_scenes(self):

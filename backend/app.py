@@ -143,7 +143,7 @@ def build_agent_instructions(character, include_stage_directions=True):
     language = character["language"]
     prompts = SYSTEM_PROMPTS if include_stage_directions else CORE_SYSTEM_PROMPTS
     constraint = language_constraint(language)
-    return f"{constraint}\n\n{character_instructions(character)}\n\n{prompts.get(language, prompts['zh'])}\n\n{constraint}"
+    return f"{constraint}\n\n{character_instructions(character)}\n\n{prompts.get(language, prompts['zh'])}"
 
 
 def realtime_character_config(character):
