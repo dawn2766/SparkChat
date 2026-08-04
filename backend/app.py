@@ -233,16 +233,31 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            character_id INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '新对话',
+            title_custom INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+        );
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             character_id INTEGER NOT NULL,
+            conversation_id INTEGER,
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+            FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS idx_conversations_owner_character
+            ON conversations(user_id, character_id, updated_at DESC);
         CREATE TABLE IF NOT EXISTS translation_cache (
             user_id INTEGER NOT NULL,
             message_id INTEGER NOT NULL,
@@ -274,6 +289,47 @@ def init_db():
         database.execute("ALTER TABLE character_overrides ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''")
     if "language" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+    message_columns = {row["name"] for row in database.execute("PRAGMA table_info(messages)").fetchall()}
+    if "conversation_id" not in message_columns:
+        database.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE")
+    database.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id)"
+    )
+    legacy_threads = database.execute(
+        """
+        SELECT user_id, character_id, MIN(created_at) AS created_at, MAX(created_at) AS updated_at
+        FROM messages
+        WHERE conversation_id IS NULL
+        GROUP BY user_id, character_id
+        """
+    ).fetchall()
+    for thread in legacy_threads:
+        first_message = database.execute(
+            """
+            SELECT content FROM messages
+            WHERE user_id = ? AND character_id = ? AND conversation_id IS NULL AND role = 'user'
+            ORDER BY id LIMIT 1
+            """,
+            (thread["user_id"], thread["character_id"]),
+        ).fetchone()
+        title = first_message["content"].strip()[:80] if first_message else "历史对话"
+        cursor = database.execute(
+            """
+            INSERT INTO conversations (user_id, character_id, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                thread["user_id"],
+                thread["character_id"],
+                title or "历史对话",
+                thread["created_at"],
+                thread["updated_at"],
+            ),
+        )
+        database.execute(
+            "UPDATE messages SET conversation_id = ? WHERE user_id = ? AND character_id = ? AND conversation_id IS NULL",
+            (cursor.lastrowid, thread["user_id"], thread["character_id"]),
+        )
     speech_cache_columns = {row["name"] for row in database.execute("PRAGMA table_info(speech_cache)").fetchall()}
     if speech_cache_columns and "cache_key" not in speech_cache_columns:
         database.execute("DROP TABLE speech_cache")
@@ -605,14 +661,106 @@ def get_character(character_id):
     ).fetchone()
 
 
-@app.get("/api/characters/<int:character_id>/messages")
+def get_conversation(character_id, conversation_id):
+    return get_db().execute(
+        """
+        SELECT c.id, c.user_id, c.character_id, c.title, c.title_custom, c.created_at, c.updated_at,
+            (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1) AS last_message
+        FROM conversations c
+        WHERE c.id = ? AND c.user_id = ? AND c.character_id = ?
+        """,
+        (conversation_id, session["user_id"], character_id),
+    ).fetchone()
+
+
+def serialize_conversation(row):
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "titleCustom": bool(row["title_custom"]) if "title_custom" in row.keys() else False,
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "lastMessage": row["last_message"] if "last_message" in row.keys() else "",
+    }
+
+
+@app.get("/api/characters/<int:character_id>/conversations")
 @login_required
-def list_messages(character_id):
+def list_conversations(character_id):
     if get_character(character_id) is None:
         return jsonify(error="未找到该角色"), 404
     rows = get_db().execute(
-        "SELECT id, role, content, created_at FROM messages WHERE user_id = ? AND character_id = ? ORDER BY id",
+        """
+        SELECT c.id, c.title, c.title_custom, c.created_at, c.updated_at,
+            (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1) AS last_message,
+            COALESCE((SELECT created_at FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1), c.updated_at) AS activity_at
+        FROM conversations c
+        WHERE c.user_id = ? AND c.character_id = ?
+        ORDER BY activity_at DESC, c.id DESC
+        """,
         (session["user_id"], character_id),
+    ).fetchall()
+    return jsonify(conversations=[serialize_conversation(row) for row in rows])
+
+
+@app.post("/api/characters/<int:character_id>/conversations")
+@login_required
+def create_conversation(character_id):
+    if get_character(character_id) is None:
+        return jsonify(error="未找到该角色"), 404
+    cursor = get_db().execute(
+        "INSERT INTO conversations (user_id, character_id) VALUES (?, ?)",
+        (session["user_id"], character_id),
+    )
+    get_db().commit()
+    row = get_conversation(character_id, cursor.lastrowid)
+    return jsonify(conversation=serialize_conversation(row)), 201
+
+
+@app.patch("/api/characters/<int:character_id>/conversations/<int:conversation_id>")
+@login_required
+def rename_conversation(character_id, conversation_id):
+    if get_character(character_id) is None:
+        return jsonify(error="未找到该角色"), 404
+    conversation = get_conversation(character_id, conversation_id)
+    if conversation is None:
+        return jsonify(error="未找到该对话"), 404
+    title = str((request.get_json(silent=True) or {}).get("title", "")).strip()
+    if not title or len(title) > 80:
+        return jsonify(error="对话名称需为 1 至 80 个字符"), 400
+    get_db().execute(
+        "UPDATE conversations SET title = ?, title_custom = 1 WHERE id = ?",
+        (title, conversation_id),
+    )
+    get_db().commit()
+    return jsonify(conversation=serialize_conversation(get_conversation(character_id, conversation_id)))
+
+
+@app.delete("/api/characters/<int:character_id>/conversations/<int:conversation_id>")
+@login_required
+def delete_conversation(character_id, conversation_id):
+    if get_character(character_id) is None:
+        return jsonify(error="未找到该角色"), 404
+    if get_conversation(character_id, conversation_id) is None:
+        return jsonify(error="未找到该对话"), 404
+    get_db().execute(
+        "DELETE FROM conversations WHERE id = ? AND user_id = ? AND character_id = ?",
+        (conversation_id, session["user_id"], character_id),
+    )
+    get_db().commit()
+    return jsonify(ok=True)
+
+
+@app.get("/api/characters/<int:character_id>/conversations/<int:conversation_id>/messages")
+@login_required
+def list_messages(character_id, conversation_id):
+    if get_character(character_id) is None:
+        return jsonify(error="未找到该角色"), 404
+    if get_conversation(character_id, conversation_id) is None:
+        return jsonify(error="未找到该对话"), 404
+    rows = get_db().execute(
+        "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
+        (conversation_id,),
     ).fetchall()
     return jsonify(messages=[dict(row) for row in rows])
 
@@ -658,7 +806,7 @@ def invalidate_message_cache(message_id, user_id=None):
     )
 
 
-def stream_character_response(character, history, replace_message_id=None):
+def stream_character_response(character, conversation_id, history, replace_message_id=None):
     @stream_with_context
     def generate():
         full_response = []
@@ -679,8 +827,8 @@ def stream_character_response(character, history, replace_message_id=None):
             if final_text:
                 if replace_message_id is None:
                     cursor = get_db().execute(
-                        "INSERT INTO messages (user_id, character_id, role, content) VALUES (?, ?, 'assistant', ?)",
-                        (session["user_id"], character["id"], final_text),
+                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'assistant', ?)",
+                        (session["user_id"], character["id"], conversation_id, final_text),
                     )
                     message_id = cursor.lastrowid
                 else:
@@ -689,6 +837,10 @@ def stream_character_response(character, history, replace_message_id=None):
                         (final_text, replace_message_id, session["user_id"]),
                     )
                     invalidate_message_cache(replace_message_id)
+                get_db().execute(
+                    "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+                    (conversation_id, session["user_id"]),
+                )
                 get_db().commit()
             yield f"data: {json.dumps({'type': 'done', 'messageId': message_id}, ensure_ascii=False)}\n\n"
         except Exception as error:
@@ -708,23 +860,47 @@ def chat(character_id):
     character = get_character(character_id)
     payload = request.get_json(silent=True) or {}
     content = payload.get("content", "").strip()
+    conversation_id = payload.get("conversationId")
     if character is None:
         return jsonify(error="未找到该角色"), 404
     if not content or len(content) > 4000:
         return jsonify(error="消息内容需为 1 至 4000 个字符"), 400
+    if conversation_id is None:
+        cursor = get_db().execute(
+            "INSERT INTO conversations (user_id, character_id) VALUES (?, ?)",
+            (session["user_id"], character_id),
+        )
+        conversation_id = cursor.lastrowid
+    conversation = get_conversation(character_id, conversation_id)
+    if conversation is None:
+        return jsonify(error="未找到该对话"), 404
 
     database = get_db()
     database.execute(
-        "INSERT INTO messages (user_id, character_id, role, content) VALUES (?, ?, 'user', ?)",
-        (session["user_id"], character_id, content),
+        "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'user', ?)",
+        (session["user_id"], character_id, conversation_id, content),
+    )
+    database.execute(
+        """
+        UPDATE conversations
+        SET title = CASE
+                WHEN title_custom = 0 AND NOT EXISTS (
+                    SELECT 1 FROM messages WHERE conversation_id = ? AND role = 'user' AND id < last_insert_rowid()
+                ) THEN ?
+                ELSE title
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND user_id = ?
+        """,
+        (conversation_id, content[:80], conversation_id, session["user_id"]),
     )
     history = database.execute(
-        "SELECT role, content FROM messages WHERE user_id = ? AND character_id = ? ORDER BY id DESC LIMIT 24",
-        (session["user_id"], character_id),
+        "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 24",
+        (conversation_id,),
     ).fetchall()[::-1]
     database.commit()
 
-    return stream_character_response(character, history)
+    return stream_character_response(character, conversation_id, history)
 
 
 @app.post("/api/characters/<int:character_id>/messages/<int:message_id>/regenerate")
@@ -734,18 +910,18 @@ def regenerate_message(character_id, message_id):
     if character is None:
         return jsonify(error="未找到该角色"), 404
     target = get_db().execute(
-        "SELECT id FROM messages WHERE id = ? AND user_id = ? AND character_id = ? AND role = 'assistant'",
+        "SELECT id, conversation_id FROM messages WHERE id = ? AND user_id = ? AND character_id = ? AND role = 'assistant'",
         (message_id, session["user_id"], character_id),
     ).fetchone()
     if target is None:
         return jsonify(error="未找到可重新生成的回复"), 404
     history = get_db().execute(
-        "SELECT role, content FROM messages WHERE user_id = ? AND character_id = ? AND id < ? ORDER BY id DESC LIMIT 24",
-        (session["user_id"], character_id, message_id),
+        "SELECT role, content FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT 24",
+        (target["conversation_id"], message_id),
     ).fetchall()[::-1]
     if not history or history[-1]["role"] != "user":
         return jsonify(error="该回复缺少对应的用户消息"), 409
-    return stream_character_response(character, history, replace_message_id=message_id)
+    return stream_character_response(character, target["conversation_id"], history, replace_message_id=message_id)
 
 
 @app.post("/api/characters/<int:character_id>/messages/<int:message_id>/translate")

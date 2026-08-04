@@ -216,13 +216,17 @@
 }
 
 .text-input,
-.text-area {
+.text-area,
+.select-input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   outline: 0;
+  caret-color: var(--accent);
+  caret-shape: bar;
   color: var(--ink);
   background: var(--surface-raised);
+  line-height: 1.55;
   transition: border-color .18s, background .18s;
 }
 
@@ -239,7 +243,6 @@
   scrollbar-color: transparent transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  line-height: 1.55;
 }
 
 .text-area:hover,
@@ -271,14 +274,22 @@
 }
 
 .text-input:hover,
-.text-area:hover {
+.text-area:hover,
+.select-input:hover {
   border-color: var(--line-strong);
 }
 
 .text-input:focus,
-.text-area:focus {
-  border-color: var(--accent);
-  background: #1d2423;
+.text-area:focus,
+.select-input:focus {
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+.text-input:focus-visible,
+.text-area:focus-visible,
+.select-input:focus-visible {
+  outline: none;
 }
 
 .primary-button,

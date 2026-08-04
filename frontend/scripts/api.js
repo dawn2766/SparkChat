@@ -19,7 +19,7 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export async function streamChat(characterId, content, onDelta, messageId = null) {
+export async function streamChat(characterId, content, onDelta, messageId = null, conversationId = null) {
   const path = messageId
     ? `/api/characters/${characterId}/messages/${messageId}/regenerate`
     : `/api/characters/${characterId}/chat`;
@@ -27,7 +27,7 @@ export async function streamChat(characterId, content, onDelta, messageId = null
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, conversationId }),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));

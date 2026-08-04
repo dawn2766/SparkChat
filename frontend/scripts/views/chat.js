@@ -1,4 +1,4 @@
-import { createIcons, Copy, Languages, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { createIcons, Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Settings2, Trash2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
@@ -6,7 +6,7 @@ import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
-const refreshIcons = () => createIcons({ icons: { Copy, Languages, Mic, MicOff, Pause, Phone, PhoneOff, Play, RefreshCw, Settings2, Volume2 } });
+const refreshIcons = () => createIcons({ icons: { Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Settings2, Trash2, Volume2, X } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -73,6 +73,15 @@ function resizeComposer(textarea) {
 function resetTextareaSize(textarea) {
   textarea.style.height = "";
   textarea.style.overflowY = "";
+}
+
+function updateComposerState(textarea) {
+  const sendButton = textarea.form?.querySelector(".send");
+  if (!sendButton) return;
+  const hasContent = textarea.value.trim().length > 0;
+  textarea.form.classList.toggle("send-hidden", !hasContent);
+  sendButton.setAttribute("aria-hidden", String(!hasContent));
+  sendButton.disabled = state.sending || !hasContent;
 }
 
 function messageActionsMarkup(message, isAssistant) {
@@ -159,7 +168,7 @@ function bindMessageActions() {
         bubble.textContent = partial;
         message.classList.remove("pending");
         scrollMessages();
-      }, Number(regenerateButton.dataset.regenerate));
+      }, Number(regenerateButton.dataset.regenerate), state.activeConversation.id);
       bubble.textContent = result.answer;
       message.dataset.messageId = result.messageId;
       const index = state.messages.findIndex((item) => item.id === Number(result.messageId));
@@ -252,6 +261,7 @@ async function toggleDictation() {
         textarea.value = `${initialText}${initialText && mergedText ? " " : ""}${mergedText}`;
         if (!data.interim) committedText = mergedText;
         resizeComposer(textarea);
+        updateComposerState(textarea);
       },
       onError: (error) => notify(error.message || "未能识别语音"),
       onClose: () => {
@@ -293,19 +303,17 @@ async function sendMessage(event) {
   if (state.sending) return;
   const form = event.currentTarget;
   const textarea = form.content;
-  const sendButton = form.querySelector(".send");
   state.sending = true;
   await stopVoiceInteraction();
   const content = textarea.value.trim();
   if (!content) {
     state.sending = false;
+    updateComposerState(textarea);
     return;
   }
   textarea.value = "";
   resizeComposer(textarea);
-  textarea.disabled = true;
-  sendButton.disabled = true;
-  sendButton.textContent = "·";
+  updateComposerState(textarea);
   state.messages.push({ role: "user", content });
   const container = document.querySelector("#messages");
   const assistant = document.createElement("div");
@@ -316,7 +324,11 @@ async function sendMessage(event) {
   const bubble = assistant.querySelector(".bubble");
   scrollMessages();
   try {
-    const result = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); });
+    const result = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); }, null, state.activeConversation.id);
+    if (state.messages.length === 1 && !state.activeConversation.titleCustom) {
+      state.activeConversation.title = content.slice(0, 80);
+      document.querySelector(".chat-meta span").textContent = state.activeConversation.title;
+    }
     state.messages.push({ id: result.messageId, role: "assistant", content: result.answer });
     assistant.classList.remove("pending");
     assistant.dataset.messageId = result.messageId;
@@ -328,12 +340,11 @@ async function sendMessage(event) {
     bubble.textContent = `未能送达回复：${error.message}`;
     textarea.value = content;
     resizeComposer(textarea);
+    updateComposerState(textarea);
     notify("发送失败，消息已保留，可再次发送");
   } finally {
     state.sending = false;
-    textarea.disabled = false;
-    sendButton.disabled = false;
-    sendButton.textContent = "↑";
+    updateComposerState(textarea);
     textarea.focus();
   }
 }
@@ -494,27 +505,162 @@ async function startPhone() {
   }
 }
 
+function formatConversationTime(value) {
+  if (!value) return "";
+  const date = new Date(`${value.replace(" ", "T")}Z`);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function historyBodyMarkup() {
+  const rows = state.conversations.map((conversation) => `<li class="conversation-row ${conversation.id === state.activeConversation?.id ? "active" : ""}" data-conversation="${conversation.id}"><button class="conversation-open" type="button"><span class="conversation-copy"><strong>${esc(conversation.title)}</strong><small>${esc(conversation.lastMessage || "空对话")}</small></span><time>${formatConversationTime(conversation.updatedAt)}</time></button><div class="conversation-options"><button class="conversation-options-button" type="button" data-conversation-options aria-label="对话选项"><i data-lucide="ellipsis"></i></button><div class="conversation-menu" role="menu"><button type="button" data-rename-conversation="${conversation.id}"><i data-lucide="pencil"></i><span>修改名称</span></button><button type="button" data-delete-conversation="${conversation.id}" class="danger"><i data-lucide="trash-2"></i><span>删除对话</span></button></div></div></li>`).join("");
+  return `<button class="new-conversation-button" type="button" id="new-conversation"><i data-lucide="plus"></i><span>创建新对话</span></button><ul class="conversation-list">${rows || `<li class="history-empty">还没有历史对话</li>`}</ul>`;
+}
+
+function historyMarkup() {
+  return `<dialog class="app-dialog history-dialog" id="history-dialog"><div class="dialog-panel"><header class="dialog-header"><div><h2>历史对话</h2></div><button class="icon-button" type="button" data-history-close aria-label="关闭历史对话"><i data-lucide="x"></i></button></header><div class="history-body">${historyBodyMarkup()}</div></div></dialog>`;
+}
+
+async function loadConversation(conversation) {
+  await stopVoiceInteraction();
+  state.activeConversation = conversation;
+  const result = await api(`/api/characters/${state.active.id}/conversations/${conversation.id}/messages`);
+  state.messages = result.messages;
+  renderChat({ onBack: window.__sparkchatBack });
+}
+
+async function createConversation() {
+  const result = await api(`/api/characters/${state.active.id}/conversations`, { method: "POST" });
+  await loadConversation(result.conversation);
+}
+
+function renderHistoryBody(dialog) {
+  dialog.querySelector(".history-body").innerHTML = historyBodyMarkup();
+  dialog.querySelector("#new-conversation").onclick = async () => { dialog.close(); await createConversation(); };
+  dialog.querySelectorAll("[data-conversation]").forEach((row) => {
+    row.querySelector(".conversation-open").onclick = async () => { dialog.close(); await loadConversation(state.conversations.find((item) => item.id === Number(row.dataset.conversation))); };
+  });
+  dialog.querySelectorAll("[data-conversation-options]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      const menu = button.nextElementSibling;
+      dialog.querySelectorAll(".conversation-menu.open").forEach((item) => { if (item !== menu) item.classList.remove("open"); });
+      menu.classList.toggle("open");
+      if (menu.classList.contains("open")) {
+        const buttonRect = button.getBoundingClientRect();
+        const menuWidth = menu.offsetWidth;
+        const menuHeight = menu.offsetHeight;
+        const edge = 8;
+        const left = Math.max(edge, Math.min(buttonRect.right - menuWidth, window.innerWidth - menuWidth - edge));
+        const below = buttonRect.bottom + 6;
+        const above = buttonRect.top - menuHeight - 6;
+        const top = below + menuHeight <= window.innerHeight - edge || above < edge ? below : above;
+        menu.style.left = `${left}px`;
+        menu.style.top = `${Math.max(edge, Math.min(top, window.innerHeight - menuHeight - edge))}px`;
+      }
+    };
+  });
+  dialog.querySelectorAll("[data-rename-conversation]").forEach((button) => {
+    button.onclick = async () => {
+      const conversation = state.conversations.find((item) => item.id === Number(button.dataset.renameConversation));
+      const row = button.closest(".conversation-row");
+      row.innerHTML = `<form class="conversation-edit"><input class="text-input" name="title" maxlength="80" required value="${esc(conversation.title)}" aria-label="对话名称"><button type="submit" aria-label="保存对话名称"><i data-lucide="check"></i></button><button type="button" data-cancel-rename aria-label="取消重命名"><i data-lucide="x"></i></button></form>`;
+      const form = row.querySelector("form");
+      form.querySelector("[data-cancel-rename]").onclick = () => renderHistoryBody(dialog);
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        const title = form.title.value.trim();
+        if (!title) return;
+        try {
+          const result = await api(`/api/characters/${state.active.id}/conversations/${conversation.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+          Object.assign(conversation, result.conversation);
+          if (state.activeConversation?.id === conversation.id) {
+            state.activeConversation = conversation;
+            document.querySelector(".chat-meta span").textContent = conversation.title;
+          }
+          renderHistoryBody(dialog);
+        } catch (error) { notify(error.message); }
+      };
+      form.title.focus();
+      form.title.select();
+      refreshIcons();
+    };
+  });
+  dialog.querySelectorAll("[data-delete-conversation]").forEach((button) => {
+    button.onclick = async () => {
+      const conversation = state.conversations.find((item) => item.id === Number(button.dataset.deleteConversation));
+      if (!conversation) return;
+      try {
+        await api(`/api/characters/${state.active.id}/conversations/${conversation.id}`, { method: "DELETE" });
+        state.conversations = state.conversations.filter((item) => item.id !== conversation.id);
+        if (state.activeConversation?.id === conversation.id) {
+          if (!state.conversations.length) {
+            dialog.close();
+            await createConversation();
+            return;
+          }
+          dialog.close();
+          await loadConversation(state.conversations[0]);
+          return;
+        }
+        renderHistoryBody(dialog);
+      } catch (error) { notify(error.message); }
+    };
+  });
+  dialog.onclick = (event) => {
+    if (event.target === dialog) {
+      dialog.close();
+      return;
+    }
+    if (!event.target.closest(".conversation-options")) dialog.querySelectorAll(".conversation-menu.open").forEach((menu) => menu.classList.remove("open"));
+  };
+  refreshIcons();
+}
+
+function bindHistory() {
+  const dialog = document.querySelector("#history-dialog");
+  document.querySelector("#history").onclick = async () => {
+    state.conversations = (await api(`/api/characters/${state.active.id}/conversations`)).conversations;
+    renderHistoryBody(dialog);
+    dialog.showModal();
+  };
+  dialog.querySelector("[data-history-close]").onclick = () => dialog.close();
+  dialog.onclick = (event) => { if (event.target === dialog) dialog.close(); };
+  renderHistoryBody(dialog);
+}
+
 export async function openChat(id, onBack) {
   state.active = state.characters.find((item) => item.id === id);
-  const result = await api(`/api/characters/${id}/messages`);
-  state.messages = result.messages;
+  window.__sparkchatBack = onBack;
+  const result = await api(`/api/characters/${id}/conversations`);
+  state.conversations = result.conversations;
+  if (!state.conversations.length) {
+    const created = await api(`/api/characters/${id}/conversations`, { method: "POST" });
+    state.conversations = [created.conversation];
+  }
+  state.activeConversation = state.conversations[0];
+  state.messages = (await api(`/api/characters/${id}/conversations/${state.activeConversation.id}/messages`)).messages;
   renderChat({ onBack });
 }
 
 export function renderChat({ onBack }) {
   const character = state.active;
   const messages = state.messages.map((message) => messageMarkup(message, character)).join("");
-  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人">‹</button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></header><div class="messages" id="messages">${messages || `<div class="empty-state">还没有消息</div>`}</div><form class="composer" id="composer"><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" placeholder="输入消息…" required></textarea><button class="composer-button send" aria-label="发送">↑</button></form></section>${settingsMarkup(character)}`;
+  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人">‹</button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong><span>${esc(state.activeConversation?.title || "新对话")}</span></div><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></header><div class="messages" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled>↑</button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
   document.querySelector("#back").onclick = async () => {
     await stopVoiceInteraction();
     onBack();
   };
   document.querySelector("#call").onclick = startPhone;
+  bindHistory();
   document.querySelector("#composer").onsubmit = sendMessage;
   const composer = document.querySelector("#composer textarea");
   composer.onkeydown = handleComposerKeydown;
-  composer.oninput = () => resizeComposer(composer);
+  composer.oninput = () => {
+    resizeComposer(composer);
+    updateComposerState(composer);
+  };
   resizeComposer(composer);
+  updateComposerState(composer);
   document.querySelector("#dictate").onclick = toggleDictation;
   bindSettings(onBack);
   bindSpeechButtons();

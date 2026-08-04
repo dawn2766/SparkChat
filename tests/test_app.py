@@ -568,6 +568,83 @@ class SparkChatApiTest(unittest.TestCase):
         finally:
             token_server.ark.responses = original_responses
 
+    def test_character_conversations_are_isolated_sorted_and_renameable(self):
+        from backend import app as token_server
+
+        class EmptyResponses:
+            @staticmethod
+            def create(**_kwargs):
+                return []
+
+        original_responses = token_server.ark.responses
+        token_server.ark.responses = EmptyResponses()
+        try:
+            self.login()
+            first = self.client.post("/api/characters/1/conversations")
+            second = self.client.post("/api/characters/1/conversations")
+            self.assertEqual(first.status_code, 201)
+            self.assertEqual(second.status_code, 201)
+            first_id = first.json["conversation"]["id"]
+            second_id = second.json["conversation"]["id"]
+
+            response = self.client.post(
+                "/api/characters/1/chat",
+                json={"conversationId": first_id, "content": "第一条会话消息"},
+            )
+            list(response.response)
+            response = self.client.post(
+                "/api/characters/1/chat",
+                json={"conversationId": second_id, "content": "最近的会话消息"},
+            )
+            list(response.response)
+
+            first_messages = self.client.get(
+                f"/api/characters/1/conversations/{first_id}/messages"
+            )
+            second_messages = self.client.get(
+                f"/api/characters/1/conversations/{second_id}/messages"
+            )
+            self.assertEqual(
+                [message["content"] for message in first_messages.json["messages"]],
+                ["第一条会话消息"],
+            )
+            self.assertEqual(
+                [message["content"] for message in second_messages.json["messages"]],
+                ["最近的会话消息"],
+            )
+
+            conversations = self.client.get("/api/characters/1/conversations")
+            self.assertEqual(
+                [item["id"] for item in conversations.json["conversations"][:2]],
+                [second_id, first_id],
+            )
+            self.assertEqual(
+                conversations.json["conversations"][0]["title"], "最近的会话消息"
+            )
+
+            renamed = self.client.patch(
+                f"/api/characters/1/conversations/{first_id}",
+                json={"title": "行动计划"},
+            )
+            self.assertEqual(renamed.status_code, 200)
+            self.assertEqual(renamed.json["conversation"]["title"], "行动计划")
+            self.assertEqual(
+                renamed.json["conversation"]["lastMessage"], "第一条会话消息"
+            )
+
+            deleted = self.client.delete(
+                f"/api/characters/1/conversations/{first_id}"
+            )
+            self.assertEqual(deleted.status_code, 200)
+            self.assertEqual(
+                self.client.get(
+                    f"/api/characters/1/conversations/{first_id}/messages"
+                ).status_code,
+                404,
+            )
+        finally:
+            token_server.ark.responses = original_responses
+
     def test_translation_uses_seed_model_and_cache(self):
         from backend import app as token_server
 

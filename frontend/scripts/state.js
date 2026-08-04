@@ -3,6 +3,8 @@ export const state = {
   characters: [],
   voices: [],
   active: null,
+  activeConversation: null,
+  conversations: [],
   messages: [],
   authMode: "login",
   conversation: null,
