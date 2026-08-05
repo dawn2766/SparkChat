@@ -1339,9 +1339,6 @@ def translate_message(character_id, message_id):
         "SELECT translated_text FROM translation_cache WHERE user_id = ? AND message_id = ?",
         (session["user_id"], message_id),
     ).fetchone()
-    if cached is not None:
-        return jsonify(translation=cached["translated_text"], cached=True)
-
     context = get_db().execute(
         """
         SELECT role, content FROM messages
@@ -1350,44 +1347,62 @@ def translate_message(character_id, message_id):
         """,
         (session["user_id"], character_id, message_id),
     ).fetchall()[::-1]
-    try:
-        response = ark.responses.create(
-            model=TRANSLATION_MODEL,
-            instructions=TRANSLATION_PROMPT,
-            input=[
-                {
-                    "role": "user",
-                    "content": "对话语境：\n"
-                    + "\n".join(
-                        f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
-                        for row in context[:-1]
-                    )
-                    + f"\n\n待翻译的数字角色回复：\n{message['content']}",
-                }
-            ],
-            extra_body={"thinking": {"type": "disabled"}},
-        )
-        translation = (getattr(response, "output_text", "") or "").strip()
-    except Exception:
-        app.logger.exception("Message translation failed")
-        return jsonify(error="翻译服务暂时不可用，请稍后重试"), 502
-    if not translation:
-        return jsonify(error="翻译服务未返回有效内容"), 502
 
-    database = get_db()
-    database.execute(
-        """
-        INSERT INTO translation_cache (user_id, message_id, translated_text)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id, message_id) DO UPDATE SET
-            translated_text = excluded.translated_text,
-            created_at = CURRENT_TIMESTAMP
-        """,
-        (session["user_id"], message_id, translation),
+    @stream_with_context
+    def generate():
+        try:
+            if cached is not None:
+                translation = cached["translated_text"]
+                yield f"data: {json.dumps({'type': 'delta', 'text': translation}, ensure_ascii=False)}\n\n"
+            else:
+                response = ark.responses.create(
+                    model=TRANSLATION_MODEL,
+                    instructions=TRANSLATION_PROMPT,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": "对话语境：\n"
+                            + "\n".join(
+                                f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
+                                for row in context[:-1]
+                            )
+                            + f"\n\n待翻译的数字角色回复：\n{message['content']}",
+                        }
+                    ],
+                    stream=True,
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
+                full_translation = []
+                for event in response:
+                    if event.type == "response.output_text.delta":
+                        full_translation.append(event.delta)
+                        yield f"data: {json.dumps({'type': 'delta', 'text': event.delta}, ensure_ascii=False)}\n\n"
+                translation = "".join(full_translation).strip()
+                if not translation:
+                    raise RuntimeError("翻译服务未返回有效内容")
+                database = get_db()
+                database.execute(
+                    """
+                    INSERT INTO translation_cache (user_id, message_id, translated_text)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, message_id) DO UPDATE SET
+                        translated_text = excluded.translated_text,
+                        created_at = CURRENT_TIMESTAMP
+                    """,
+                    (session["user_id"], message_id, translation),
+                )
+                trim_user_cache("translation_cache")
+                database.commit()
+            yield f"data: {json.dumps({'type': 'done', 'messageId': message_id}, ensure_ascii=False)}\n\n"
+        except Exception as error:
+            app.logger.exception("Message translation failed")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(error)}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
-    trim_user_cache("translation_cache")
-    database.commit()
-    return jsonify(translation=translation, cached=False)
 
 
 def synthesize_speech_response(character, text, message_id=None):

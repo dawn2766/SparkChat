@@ -1,5 +1,5 @@
 import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, Languages, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
-import { api, apiUrl, streamChat } from "../api.js";
+import { api, apiUrl, streamChat, streamTranslation } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
@@ -281,17 +281,24 @@ function bindMessageActions() {
         return;
       }
       translateButton.disabled = true;
+      message.classList.add("pending");
       try {
-        const result = await api(`/api/characters/${state.active.id}/messages/${translateButton.dataset.translate}/translate`, { method: "POST" });
-        bubble.textContent = result.translation;
+        const translation = await streamTranslation(state.active.id, translateButton.dataset.translate, (partial) => {
+          bubble.textContent = partial;
+          message.classList.remove("pending");
+          scrollMessages();
+        });
+        bubble.textContent = translation;
         message.dataset.translated = "true";
         translateButton.setAttribute("aria-label", "显示原文");
         translateButton.classList.add("active");
         stopSpeechAudio();
       } catch (error) {
+        bubble.textContent = message.dataset.originalContent;
         notify(error.message);
       } finally {
         translateButton.disabled = false;
+        message.classList.remove("pending");
       }
       return;
     }

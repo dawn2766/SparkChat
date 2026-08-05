@@ -19,17 +19,12 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export async function streamChat(characterId, content, onDelta, messageId = null, conversationId = null, rewrite = false) {
-  const path = rewrite
-    ? `/api/characters/${characterId}/messages/${messageId}/rewrite`
-    : messageId
-      ? `/api/characters/${characterId}/messages/${messageId}/regenerate`
-      : `/api/characters/${characterId}/chat`;
+async function streamResponse(path, body, onDelta, emptyMessage) {
   const response = await fetch(apiUrl(path), {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, conversationId }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -41,8 +36,7 @@ export async function streamChat(characterId, content, onDelta, messageId = null
   const decoder = new TextDecoder();
   let buffer = "";
   let answer = "";
-  let resultMessageId = messageId;
-  let userMessageId = rewrite ? messageId : null;
+  let result = {};
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -57,12 +51,31 @@ export async function streamChat(characterId, content, onDelta, messageId = null
         onDelta(answer);
       }
       if (data.type === "done") {
-        resultMessageId = data.messageId;
-        userMessageId = data.userMessageId ?? userMessageId;
+        result = data;
       }
       if (data.type === "error") throw Error(data.message);
     }
   }
-  if (!answer.trim()) throw Error("角色没有返回有效内容");
-  return { answer, messageId: resultMessageId, userMessageId };
+  if (!answer.trim()) throw Error(emptyMessage);
+  return { answer, ...result };
+}
+
+export async function streamChat(characterId, content, onDelta, messageId = null, conversationId = null, rewrite = false) {
+  const path = rewrite
+    ? `/api/characters/${characterId}/messages/${messageId}/rewrite`
+    : messageId
+      ? `/api/characters/${characterId}/messages/${messageId}/regenerate`
+      : `/api/characters/${characterId}/chat`;
+  const result = await streamResponse(path, { content, conversationId }, onDelta, "角色没有返回有效内容");
+  return {
+    answer: result.answer,
+    messageId: result.messageId ?? messageId,
+    userMessageId: result.userMessageId ?? (rewrite ? messageId : null),
+  };
+}
+
+export async function streamTranslation(characterId, messageId, onDelta) {
+  const path = `/api/characters/${characterId}/messages/${messageId}/translate`;
+  const result = await streamResponse(path, {}, onDelta, "翻译服务未返回有效内容");
+  return result.answer;
 }
