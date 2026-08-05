@@ -35,27 +35,14 @@ html {
   background: var(--bg);
 }
 
-html,
-body,
-#app,
-.view,
-.app-dialog,
-.dialog-panel,
-.dialog-body,
-.messages {
+.scroll-container {
   scrollbar-width: none;
 }
 
-html::-webkit-scrollbar,
-body::-webkit-scrollbar,
-#app::-webkit-scrollbar,
-.view::-webkit-scrollbar,
-.app-dialog::-webkit-scrollbar,
-.dialog-panel::-webkit-scrollbar,
-.dialog-body::-webkit-scrollbar,
-.messages::-webkit-scrollbar {
+.scroll-container::-webkit-scrollbar {
   width: 0;
   height: 0;
+  display: none;
 }
 
 body {

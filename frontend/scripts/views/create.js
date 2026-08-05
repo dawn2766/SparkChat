@@ -28,8 +28,7 @@ function bindVoiceSelection() {
 
 export function renderCreate({ bindShell, onCreated }) {
   const selected = state.voices[0];
-  const content = `<form id="create-form">
-    <section class="page-heading"><div><h1>新建角色</h1></div></section>
+  const content = `<section class="page-heading"><div><h1>新建角色</h1></div></section><form class="main-page-body scroll-container" id="create-form">
     <section class="section">${avatarFieldMarkup({ id: "create-avatar" })}</section>
     <section class="section"><div class="field"><label for="character-name">角色名称</label><input class="text-input" id="character-name" name="name" required maxlength="40" placeholder="例如：阿尔茜"></div></section>
     <section class="section"><div class="field"><label for="persona">身份背景</label><textarea class="text-area" id="persona" name="persona" required maxlength="2400" placeholder="角色的身份、经历、性格、价值观与表达方式"></textarea></div></section>

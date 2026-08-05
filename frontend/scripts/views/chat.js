@@ -466,7 +466,6 @@ async function sendMessage(event) {
     }
     if (state.messages.length === 1 && !state.activeConversation.titleCustom) {
       state.activeConversation.title = content.slice(0, 80);
-      document.querySelector(".chat-meta span").textContent = state.activeConversation.title;
     }
     state.messages.push({ id: result.messageId, role: "assistant", content: result.answer });
     assistant.classList.remove("pending");
@@ -503,7 +502,7 @@ function settingsMarkup(character) {
   return `<dialog class="app-dialog character-dialog" id="character-dialog">
     <form class="dialog-panel" id="character-form">
       <header class="dialog-header"><div><h2>角色配置</h2></div></header>
-      <div class="dialog-body">
+      <div class="dialog-body scroll-container">
         ${avatarFieldMarkup({ currentUrl: character.avatarUrl, id: "edit-avatar" })}
         <div class="field"><label for="edit-name">角色名称</label><input class="text-input" id="edit-name" name="name" maxlength="40" required value="${esc(character.name)}"></div>
         <div class="field"><label for="edit-persona">身份背景</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
@@ -672,11 +671,11 @@ function formatConversationTime(value) {
 
 function historyBodyMarkup() {
   const rows = state.conversations.map((conversation) => `<li class="conversation-row ${conversation.id === state.activeConversation?.id ? "active" : ""}" data-conversation="${conversation.id}"><button class="conversation-open" type="button"><span class="conversation-copy"><strong>${esc(conversation.title)}</strong><small>${esc(conversation.lastMessage || "空对话")}</small></span><time>${formatConversationTime(conversation.updatedAt)}</time></button><div class="conversation-options"><button class="conversation-options-button" type="button" data-conversation-options aria-label="对话选项"><i data-lucide="ellipsis"></i></button><div class="conversation-menu" role="menu"><button type="button" data-rename-conversation="${conversation.id}"><i data-lucide="pencil"></i><span>修改名称</span></button><button type="button" data-delete-conversation="${conversation.id}" class="danger"><i data-lucide="trash-2"></i><span>删除对话</span></button></div></div></li>`).join("");
-  return `<button class="new-conversation-button" type="button" id="new-conversation"><i data-lucide="plus"></i><span>创建新对话</span></button><ul class="conversation-list">${rows || `<li class="history-empty">还没有历史对话</li>`}</ul>`;
+  return `<button class="primary-button new-conversation-button" type="button" id="new-conversation"><i data-lucide="plus"></i><span>创建新对话</span></button><ul class="conversation-list">${rows || `<li class="history-empty">还没有历史对话</li>`}</ul>`;
 }
 
 function historyMarkup() {
-  return `<dialog class="app-dialog history-dialog" id="history-dialog"><div class="dialog-panel"><header class="dialog-header"><div><h2>历史对话</h2></div><button class="icon-button" type="button" data-history-close aria-label="关闭历史对话"><i data-lucide="x"></i></button></header><div class="history-body">${historyBodyMarkup()}</div></div></dialog>`;
+  return `<dialog class="app-dialog history-dialog" id="history-dialog"><div class="dialog-panel"><header class="dialog-header"><div><h2>历史对话</h2></div><button class="icon-button" type="button" data-history-close aria-label="关闭历史对话"><i data-lucide="x"></i></button></header><div class="history-body scroll-container">${historyBodyMarkup()}</div></div></dialog>`;
 }
 
 async function loadConversation(conversation) {
@@ -734,7 +733,6 @@ function renderHistoryBody(dialog) {
           Object.assign(conversation, result.conversation);
           if (state.activeConversation?.id === conversation.id) {
             state.activeConversation = conversation;
-            document.querySelector(".chat-meta span").textContent = conversation.title;
           }
           renderHistoryBody(dialog);
         } catch (error) { notify(error.message); }
@@ -807,7 +805,7 @@ export function renderChat({ onBack }) {
   const latestAssistantIndex = state.messages.reduce((latest, message, index) => message.role === "assistant" ? index : latest, -1);
   const latestUserIndex = state.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
   const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex, index === latestUserIndex)).join("");
-  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong><span>${esc(state.activeConversation?.title || "新对话")}</span></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
+  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages scroll-container" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
   document.querySelector("#back").onclick = async () => {
     await stopVoiceInteraction();
     onBack();

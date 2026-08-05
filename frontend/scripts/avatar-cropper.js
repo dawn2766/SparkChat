@@ -171,7 +171,7 @@ export function bindAvatarEditor(root) {
     renderCrop();
   };
 
-  dialog.querySelector("[data-crop-cancel]").onclick = closeCropper;
+  dialog.querySelectorAll("[data-crop-cancel]").forEach((button) => { button.onclick = closeCropper; });
   dialog.oncancel = (event) => { event.preventDefault(); closeCropper(); };
   dialog.onclick = (event) => { if (event.target === dialog) closeCropper(); };
 

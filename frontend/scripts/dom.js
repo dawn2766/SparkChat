@@ -18,7 +18,7 @@ export function notify(text) {
 export function confirmDeletion({ title = "确认删除", name, message = "删除后将无法恢复。" }) {
   const dialog = document.createElement("dialog");
   dialog.className = "app-dialog confirm-dialog";
-  dialog.innerHTML = `<form method="dialog" class="dialog-panel"><header class="dialog-header"><h2>${esc(title)}</h2><button class="icon-button" type="submit" value="cancel" aria-label="关闭确认弹窗">×</button></header><div class="dialog-body"><p class="confirm-dialog-message">确定要删除“<strong>${esc(name)}</strong>”吗？${esc(message)}</p></div><footer class="dialog-actions"><button class="secondary-button" type="submit" value="cancel">取消</button><button class="danger-button" type="submit" value="confirm">确认删除</button></footer></form>`;
+  dialog.innerHTML = `<form method="dialog" class="dialog-panel"><header class="dialog-header"><h2>${esc(title)}</h2><button class="icon-button" type="submit" value="cancel" aria-label="关闭确认弹窗"><span aria-hidden="true">×</span></button></header><div class="dialog-body scroll-container"><p class="confirm-dialog-message">确定要删除“<strong>${esc(name)}</strong>”吗？${esc(message)}</p></div><footer class="dialog-actions"><button class="secondary-button" type="submit" value="cancel">取消</button><button class="danger-button" type="submit" value="confirm">确认删除</button></footer></form>`;
   document.body.append(dialog);
   dialog.showModal();
   dialog.addEventListener("cancel", (event) => {

@@ -34,19 +34,6 @@
     padding-right: 16px;
   }
 
-  .field-grid,
-  .voice-list {
-    grid-template-columns: 1fr;
-  }
-
-  .voice-picker {
-    grid-template-columns: 1fr;
-  }
-
-  .field-wide {
-    grid-column: auto;
-  }
-
   .auth-view {
     min-height: 100dvh;
     padding: max(30px, env(safe-area-inset-top)) 22px max(30px, env(safe-area-inset-bottom));
@@ -71,10 +58,51 @@
 
   .app-dialog {
     width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
   }
 
   .dialog-body {
     padding: 16px;
+  }
+
+  .dialog-header,
+  .dialog-actions {
+    padding: 14px 16px;
+  }
+
+  .dialog-actions,
+  .dialog-actions-split {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .dialog-action-group {
+    flex: 1 1 100%;
+  }
+
+  .dialog-action-group > button {
+    flex: 1 1 0;
+  }
+
+  .character-dialog .dialog-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .character-dialog .dialog-action-group {
+    display: contents;
+  }
+
+  .character-dialog .dialog-actions:not(.dialog-actions-split) {
+    grid-template-columns: repeat(2, minmax(0, 105px));
+    justify-content: end;
+  }
+
+  .character-dialog .dialog-actions button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 10px;
   }
 
   .avatar-field {
@@ -91,10 +119,24 @@
 
   .user-admin-row {
     gap: 8px;
+    align-items: flex-start;
+  }
+
+  .user-admin-identity {
+    flex: 1 1 120px;
+  }
+
+  .user-admin-actions {
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
   }
 
   .user-admin-actions .compact-button {
     flex: 0 0 auto;
+    min-width: 0;
+    min-height: 38px;
+    padding-inline: 10px;
   }
 
   .user-password-form > div {
@@ -107,25 +149,17 @@
   }
 
   .admin-manager-dialog {
-    height: min(92vh, 760px);
-  }
-
-  .admin-manager-controls {
-    grid-template-columns: 1fr;
-    padding: 14px 16px;
-  }
-
-  .admin-create-button {
-    width: 100%;
+    max-height: calc(100dvh - 24px);
   }
 
   .admin-voice-editor,
   .admin-role-editor {
-    padding: 16px;
+    padding: 0;
   }
 
-  .voice-admin-form {
-    grid-template-columns: 1fr;
+  .admin-editor-scroll,
+  .admin-role-editor .admin-editor-scroll {
+    padding: 16px;
   }
 
   .avatar-choose {
@@ -172,6 +206,13 @@
 
 }
 
+@media (max-width: 580px) {
+  #create-form .section {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -180,5 +221,30 @@
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .admin-manager-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-create-button {
+    width: 100%;
+  }
+
+  .voice-admin-fields,
+  .role-admin-form .field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 701px) {
+  .voice-admin-fields {
+    grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr);
+  }
+
+  .role-admin-form .field-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
