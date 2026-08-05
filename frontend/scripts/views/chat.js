@@ -684,7 +684,7 @@ function voiceMessageMarkup(message) {
 
 function voiceHistoryMarkup() {
   const rows = state.voiceConversations.map((conversation) => `<li class="conversation-row ${conversation.id === state.activeVoiceConversation?.id ? "active" : ""}" data-voice-conversation="${conversation.id}"><button class="conversation-open" type="button" data-open-voice><span class="conversation-copy"><strong>${esc(conversation.title)}</strong><small>${esc(conversation.lastMessage || "空通话")}</small></span><time>${formatConversationTime(conversation.updatedAt)}</time></button><div class="conversation-options"><button class="conversation-options-button" type="button" data-voice-options aria-label="通话选项"><i data-lucide="ellipsis"></i></button><div class="conversation-menu" role="menu"><button type="button" data-view-voice><i data-lucide="messages-square"></i><span>查看聊天记录</span></button><button type="button" data-rename-voice><i data-lucide="pencil"></i><span>修改名称</span></button><button type="button" data-delete-voice class="danger"><i data-lucide="trash-2"></i><span>删除通话</span></button></div></div></li>`).join("");
-  return `<ul class="conversation-list voice-conversation-list">${rows || `<li class="history-empty">还没有历史通话</li>`}</ul>`;
+  return `<button class="primary-button new-conversation-button" type="button" id="new-voice-conversation"><i data-lucide="plus"></i><span>开启新通话</span></button><ul class="conversation-list voice-conversation-list">${rows || `<li class="history-empty">还没有历史通话</li>`}</ul>`;
 }
 
 function voiceHistoryDialogMarkup() {
@@ -726,6 +726,17 @@ async function bindVoiceHistory(dialog, phone) {
   const render = () => {
     dialog.querySelector(".history-body").innerHTML = voiceHistoryMarkup();
     refreshIcons();
+    dialog.querySelector("#new-voice-conversation").onclick = async () => {
+      const result = await api(`/api/characters/${state.active.id}/voice-conversations`, { method: "POST" });
+      state.voiceConversations = [result.conversation, ...state.voiceConversations];
+      state.activeVoiceConversation = result.conversation;
+      state.voiceMessages = [];
+      dialog.close();
+      await state.conversation?.stop();
+      state.conversation = null;
+      phone.remove();
+      await startPhone();
+    };
     dialog.querySelectorAll("[data-voice-conversation]").forEach((row) => {
       const conversation = state.voiceConversations.find((item) => item.id === Number(row.dataset.voiceConversation));
       row.querySelector("[data-open-voice]").onclick = async () => {
@@ -902,7 +913,7 @@ function formatConversationTime(value) {
 
 function historyBodyMarkup() {
   const rows = state.conversations.map((conversation) => `<li class="conversation-row ${conversation.id === state.activeConversation?.id ? "active" : ""}" data-conversation="${conversation.id}"><button class="conversation-open" type="button"><span class="conversation-copy"><strong>${esc(conversation.title)}</strong><small>${esc(conversation.lastMessage || "空对话")}</small></span><time>${formatConversationTime(conversation.updatedAt)}</time></button><div class="conversation-options"><button class="conversation-options-button" type="button" data-conversation-options aria-label="对话选项"><i data-lucide="ellipsis"></i></button><div class="conversation-menu" role="menu"><button type="button" data-rename-conversation="${conversation.id}"><i data-lucide="pencil"></i><span>修改名称</span></button><button type="button" data-delete-conversation="${conversation.id}" class="danger"><i data-lucide="trash-2"></i><span>删除对话</span></button></div></div></li>`).join("");
-  return `<button class="primary-button new-conversation-button" type="button" id="new-conversation"><i data-lucide="plus"></i><span>创建新对话</span></button><ul class="conversation-list">${rows || `<li class="history-empty">还没有历史对话</li>`}</ul>`;
+  return `<button class="primary-button new-conversation-button" type="button" id="new-conversation"><i data-lucide="plus"></i><span>开启新对话</span></button><ul class="conversation-list">${rows || `<li class="history-empty">还没有历史对话</li>`}</ul>`;
 }
 
 function historyMarkup() {
