@@ -34,7 +34,10 @@ function assistantText(data) {
 }
 
 export async function createRealtimeSession(character, handlers = {}, options = {}) {
-  const config = await api(`/api/token?characterId=${character.id}`);
+  const voiceConversationParam = options.voiceConversationId
+    ? `&voiceConversationId=${encodeURIComponent(options.voiceConversationId)}`
+    : "";
+  const config = await api(`/api/token?characterId=${character.id}${voiceConversationParam}`);
   const url = config.websocketUrl.startsWith("ws")
     ? config.websocketUrl
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${config.websocketUrl}`;
@@ -52,6 +55,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let assistantSpokenText = "";
   let assistantQuestionId = "";
   let assistantReplyId = "";
+  let userTurnText = "";
   let interruptedQuestionId = "";
   let playbackInterrupted = false;
   const playbackNodes = new Set();
@@ -135,8 +139,13 @@ export async function createRealtimeSession(character, handlers = {}, options = 
             playbackInterrupted = true;
             interruptPlayback();
           }
+          userTurnText = mergeRealtimeText(userTurnText, result.text);
           handlers.onTranscript?.({ text: result.text, interim: result.is_interim });
         });
+      }
+      if (message.event === 459 && userTurnText.trim()) {
+        handlers.onTurnComplete?.({ role: "user", content: userTurnText.trim() });
+        userTurnText = "";
       }
       if (message.event === 350 || message.event === 550) {
         const questionId = String(data.question_id || "");
@@ -169,6 +178,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
             handlers.onText?.(assistantSpokenText);
           }
         }
+      }
+      if (message.event === 559) {
+        const content = (assistantChatText || assistantSpokenText).trim();
+        if (content) handlers.onTurnComplete?.({ role: "assistant", content });
       }
       if (message.event === 150) handlers.onReady?.();
     }

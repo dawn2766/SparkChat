@@ -28,6 +28,18 @@
     padding-right: 16px;
   }
 
+  .profile-setting {
+    align-items: center;
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  .profile-setting .select-control {
+    width: min(58%, 220px);
+    max-width: 220px;
+    flex: 0 1 220px;
+  }
+
   .auth-view {
     min-height: 100dvh;
     padding: max(30px, env(safe-area-inset-top)) 22px max(30px, env(safe-area-inset-bottom));
@@ -178,6 +190,19 @@
 
   .chat-header {
     padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .phone-overlay {
+    padding: calc(58px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+    gap: 30px;
+  }
+
+  .phone-header {
+    width: 100%;
+  }
+
+  .phone-subtitles {
+    width: min(100%, 340px);
   }
 
   .message-action,

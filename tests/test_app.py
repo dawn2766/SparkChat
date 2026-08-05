@@ -906,6 +906,154 @@ class SparkChatApiTest(unittest.TestCase):
         finally:
             token_server.ark.responses = original_responses
 
+    def test_character_preview_is_empty_when_latest_conversation_has_no_messages(self):
+        from backend.app import get_db
+
+        self.login()
+        voice = self.client.get("/api/voices").json["voices"][0]
+        created = self.client.post(
+            "/api/characters",
+            json={
+                "name": "空会话摘要测试",
+                "persona": "测试",
+                "voiceId": voice["id"],
+                "voiceName": voice["name"],
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        character_id = created.json["character"]["id"]
+        first_conversation = self.client.post(
+            f"/api/characters/{character_id}/conversations"
+        ).json["conversation"]
+
+        with self.app.app_context():
+            database = get_db()
+            database.execute(
+                """
+                INSERT INTO messages (
+                    user_id, character_id, conversation_id, role, content
+                ) VALUES (1, ?, ?, 'assistant', '上一段对话')
+                """,
+                (character_id, first_conversation["id"]),
+            )
+            database.execute(
+                "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (first_conversation["id"],),
+            )
+            database.commit()
+
+        previous = next(
+            character
+            for character in self.client.get("/api/characters").json["characters"]
+            if character["id"] == character_id
+        )
+        self.assertEqual(previous["lastMessage"], "上一段对话")
+
+        self.assertEqual(
+            self.client.post(f"/api/characters/{character_id}/conversations").status_code,
+            201,
+        )
+        current = next(
+            character
+            for character in self.client.get("/api/characters").json["characters"]
+            if character["id"] == character_id
+        )
+        self.assertEqual(current["lastMessage"], "")
+        self.assertIsNone(current["lastMessageAt"])
+
+        self.assertEqual(
+            self.client.delete(f"/api/characters/{character_id}").status_code, 200
+        )
+
+    def test_voice_conversations_are_independent_and_feed_realtime_context(self):
+        from backend import app as token_server
+
+        self.login()
+        first = self.client.post("/api/characters/1/voice-conversations")
+        second = self.client.post("/api/characters/1/voice-conversations")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        first_id = first.json["conversation"]["id"]
+        second_id = second.json["conversation"]["id"]
+
+        for role, content in (("user", "语音里的问题"), ("assistant", "语音里的回答")):
+            response = self.client.post(
+                f"/api/characters/1/voice-conversations/{first_id}/messages",
+                json={"role": role, "content": content},
+            )
+            self.assertEqual(response.status_code, 201)
+        self.client.post(
+            f"/api/characters/1/voice-conversations/{second_id}/messages",
+            json={"role": "user", "content": "最近语音通话"},
+        )
+
+        listed = self.client.get("/api/characters/1/voice-conversations")
+        self.assertEqual(
+            [item["id"] for item in listed.json["conversations"][:2]],
+            [second_id, first_id],
+        )
+        messages = self.client.get(
+            f"/api/characters/1/voice-conversations/{first_id}/messages"
+        ).json["messages"]
+        self.assertEqual(
+            [message["content"] for message in messages],
+            ["语音里的问题", "语音里的回答"],
+        )
+        text_messages = self.client.get("/api/characters/1/conversations")
+        self.assertNotIn(
+            "语音里的回答",
+            [item["lastMessage"] for item in text_messages.json["conversations"]],
+        )
+
+        renamed = self.client.patch(
+            f"/api/characters/1/voice-conversations/{first_id}",
+            json={"title": "语音行动计划"},
+        )
+        self.assertEqual(renamed.json["conversation"]["title"], "语音行动计划")
+
+        original_client = token_server.doubao_speech
+        try:
+            token_server.doubao_speech = type("ConfiguredSpeech", (), {"configured": True})()
+            token = self.client.get(
+                f"/api/token?characterId=1&voiceConversationId={first_id}"
+            )
+            self.assertEqual(token.status_code, 200)
+            self.assertEqual(token.json["voiceConversationId"], first_id)
+            self.assertIn("语音里的问题", token.json["instructions"])
+            self.assertIn("语音里的回答", token.json["instructions"])
+        finally:
+            token_server.doubao_speech = original_client
+
+        self.client.post("/api/auth/logout")
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/register",
+                json={"username": "VoiceOther", "password": "1234"},
+            ).status_code,
+            201,
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/characters/1/voice-conversations/{first_id}/messages"
+            ).status_code,
+            404,
+        )
+
+        self.client.post("/api/auth/logout")
+        self.login()
+        self.assertEqual(
+            self.client.delete(
+                f"/api/characters/1/voice-conversations/{first_id}"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/characters/1/voice-conversations/{first_id}/messages"
+            ).status_code,
+            404,
+        )
+
     def test_edit_latest_user_message_rewrites_history_atomically(self):
         from backend import app as token_server
 

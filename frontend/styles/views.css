@@ -627,6 +627,9 @@
 }
 
 .profile-card {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -634,6 +637,11 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+}
+
+.profile-card > div:last-child,
+.profile-link > span:first-child {
+  min-width: 0;
 }
 
 .profile-label {
@@ -645,6 +653,9 @@
 }
 
 .profile-setting {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -662,12 +673,17 @@
 }
 
 .profile-setting .select-control {
-  width: min(58%, 240px);
-  flex: 1 1 240px;
+  min-width: 0;
+  width: min(58%, 220px);
+  max-width: 220px;
+  margin-left: auto;
+  flex: 0 1 220px;
 }
 
 .profile-link {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -688,6 +704,7 @@
   margin-top: 4px;
   color: var(--muted);
   font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 .profile-section {
@@ -1295,12 +1312,37 @@
   background: radial-gradient(circle at 50% 34%, rgb(216 243 93 / 11%), transparent 32%), #101414;
 }
 
+.phone-header {
+  width: min(100%, 580px);
+  min-height: calc(68px + env(safe-area-inset-top));
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  backdrop-filter: blur(16px);
+}
+
+.phone-history-button {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+}
+
+.phone-history-button svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.2;
+}
+
 .phone-controls {
   width: min(100%, 380px);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 28px;
+  gap: 48px;
 }
 
 .phone-stage {
@@ -1433,6 +1475,59 @@
 .user-subtitle::before { content: "用户"; }
 .assistant-subtitle::before { content: "角色"; color: var(--accent); }
 .user-subtitle.interim { opacity: .65; }
+
+.phone-live-actions {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.phone-live-actions .message-action {
+  width: 28px;
+  height: 24px;
+}
+
+.voice-history-page {
+  width: min(100%, 580px);
+  height: 100dvh;
+  min-height: 0;
+  position: fixed;
+  z-index: 22;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.voice-history-page .page-heading {
+  flex: 0 0 auto;
+  position: relative;
+  justify-content: center;
+  padding-right: 56px;
+  padding-left: 56px;
+}
+
+.voice-history-page .page-heading h1 {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-history-page .voice-history-back {
+  position: absolute;
+  left: 8px;
+  top: env(safe-area-inset-top);
+}
+
+.voice-history-page .messages {
+  min-height: 0;
+  width: 100%;
+}
 
 .end-call {
   width: 60px;

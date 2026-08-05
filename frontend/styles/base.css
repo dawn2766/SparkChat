@@ -32,10 +32,12 @@
 }
 
 html {
+  width: 100%;
   min-height: 100%;
+  overflow-x: hidden;
   background: var(--bg);
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
 }
 
 .scroll-container {
@@ -49,8 +51,10 @@ html {
 }
 
 body {
+  width: 100%;
   min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   touch-action: manipulation;
   color: var(--ink);
   background:
@@ -100,6 +104,7 @@ p {
 
 #app {
   width: min(100%, 580px);
+  max-width: 100%;
   min-height: 100vh;
   margin: 0 auto;
   position: relative;

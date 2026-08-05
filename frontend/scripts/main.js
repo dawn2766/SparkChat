@@ -10,7 +10,14 @@ async function loadHome() {
     api("/api/characters"),
     api("/api/voices"),
   ]);
-  state.characters = characters.characters;
+  state.characters = characters.characters.map((character) => {
+    const conversation = state.selectedConversations?.[character.id];
+    return conversation ? {
+      ...character,
+      lastMessage: conversation.lastMessage || "",
+      lastMessageAt: conversation.updatedAt || null,
+    } : character;
+  });
   state.voices = voices.voices;
   renderHome({ bindShell, openChat: openCharacter });
 }

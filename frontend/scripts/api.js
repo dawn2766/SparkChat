@@ -79,3 +79,9 @@ export async function streamTranslation(characterId, messageId, onDelta) {
   const result = await streamResponse(path, {}, onDelta, "翻译服务未返回有效内容");
   return result.answer;
 }
+
+export async function streamVoiceTranslation(characterId, messageId, onDelta) {
+  const path = `/api/characters/${characterId}/voice-messages/${messageId}/translate`;
+  const result = await streamResponse(path, {}, onDelta, "翻译服务未返回有效内容");
+  return result.answer;
+}
