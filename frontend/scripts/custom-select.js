@@ -144,6 +144,12 @@ function enhanceSelect(select) {
   };
   select.addEventListener("change", sync);
   select.form?.addEventListener("reset", () => requestAnimationFrame(sync));
+  new MutationObserver(sync).observe(select, {
+    attributes: true,
+    attributeFilter: ["disabled"],
+    childList: true,
+    subtree: true,
+  });
 }
 
 export function bindCustomSelects(root) {

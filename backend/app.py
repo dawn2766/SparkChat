@@ -117,7 +117,14 @@ SYSTEM_PROMPTS = {
 }
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
 TRANSLATION_MODEL = os.getenv("ARK_TRANSLATION_MODEL", "doubao-seed-2-1-pro-260628")
-MEMORY_MODEL = os.getenv("ARK_MEMORY_MODEL", os.getenv("ARK_MODEL", "doubao-seed-character-260628"))
+DEFAULT_CHAT_MODEL = os.getenv("ARK_DEFAULT_CHAT_MODEL", "doubao-seed-character-260628")
+CHAT_MODELS = {
+    "deepseek-v4-pro-260425": "DeepSeek V4 Pro",
+    "doubao-seed-character-260628": "Doubao Seed Character",
+}
+if DEFAULT_CHAT_MODEL not in CHAT_MODELS:
+    raise RuntimeError("ARK_DEFAULT_CHAT_MODEL must be one of the supported chat models")
+MEMORY_MODEL = os.getenv("ARK_MEMORY_MODEL", "doubao-seed-2-1-pro-260628")
 MEMORY_PROMPT = """你负责维护一段数字角色对当前对话的长期记忆。请将旧记忆与新增对话合并为紧凑、准确、可继续更新的记忆。
 保留用户与角色的重要事实、偏好、承诺、关系变化、情绪延续、未完成事项，以及后续理解对话所需的事件顺序。
 不要虚构，不要把临时寒暄写成永久事实，不要评价提示词或总结过程。只输出更新后的记忆正文。"""
@@ -224,6 +231,7 @@ def init_db():
             username TEXT NOT NULL UNIQUE COLLATE NOCASE,
             password_hash TEXT NOT NULL,
             is_admin INTEGER NOT NULL DEFAULT 0,
+            chat_model TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS voices (
@@ -318,6 +326,12 @@ def init_db():
     user_columns = {row["name"] for row in database.execute("PRAGMA table_info(users)").fetchall()}
     if "is_admin" not in user_columns:
         database.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+    if "chat_model" not in user_columns:
+        database.execute("ALTER TABLE users ADD COLUMN chat_model TEXT")
+    database.execute(
+        "UPDATE users SET chat_model = ? WHERE chat_model IS NULL OR chat_model NOT IN (?, ?)",
+        (DEFAULT_CHAT_MODEL, *CHAT_MODELS),
+    )
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
     if "language" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
@@ -392,12 +406,12 @@ def init_db():
             """
         )
     database.execute(
-        "INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)",
-        ("CaraLin", generate_password_hash("2766")),
+        "INSERT OR IGNORE INTO users (username, password_hash, chat_model) VALUES (?, ?, ?)",
+        ("CaraLin", generate_password_hash("2766"), DEFAULT_CHAT_MODEL),
     )
     database.execute(
-        "INSERT OR IGNORE INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)",
-        ("Admin", generate_password_hash("123")),
+        "INSERT OR IGNORE INTO users (username, password_hash, is_admin, chat_model) VALUES (?, ?, 1, ?)",
+        ("Admin", generate_password_hash("123"), DEFAULT_CHAT_MODEL),
     )
     database.execute("UPDATE users SET is_admin = 1 WHERE username = ? COLLATE NOCASE", ("Admin",))
     database.execute(
@@ -487,6 +501,7 @@ def serialize_user(row):
         "id": row["id"],
         "username": row["username"],
         "isAdmin": bool(row["is_admin"]),
+        "chatModel": row["chat_model"] if "chat_model" in row.keys() else DEFAULT_CHAT_MODEL,
         "createdAt": row["created_at"] if "created_at" in row.keys() else None,
     }
 
@@ -528,8 +543,8 @@ def register():
         return jsonify(error="密码长度需为 4 至 128 个字符"), 400
     try:
         cursor = get_db().execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, generate_password_hash(password)),
+            "INSERT INTO users (username, password_hash, chat_model) VALUES (?, ?, ?)",
+            (username, generate_password_hash(password), DEFAULT_CHAT_MODEL),
         )
         get_db().commit()
     except sqlite3.IntegrityError:
@@ -574,6 +589,30 @@ def current_user():
     return jsonify(user=serialize_user(user))
 
 
+@app.get("/api/profile/models")
+@login_required
+def list_chat_models():
+    return jsonify(
+        models=[{"id": model_id, "name": name} for model_id, name in CHAT_MODELS.items()]
+    )
+
+
+@app.patch("/api/profile/model")
+@login_required
+def update_chat_model():
+    model_id = str((request.get_json(silent=True) or {}).get("model", "")).strip()
+    if model_id not in CHAT_MODELS:
+        return jsonify(error="不支持该聊天模型"), 400
+    database = get_db()
+    database.execute(
+        "UPDATE users SET chat_model = ? WHERE id = ?",
+        (model_id, session["user_id"]),
+    )
+    database.commit()
+    user = database.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+    return jsonify(user=serialize_user(user))
+
+
 @app.get("/api/admin/users")
 @admin_required
 def list_users():
@@ -595,8 +634,8 @@ def create_user():
         return jsonify(error="密码长度需为 4 至 128 个字符"), 400
     try:
         cursor = get_db().execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, generate_password_hash(password)),
+            "INSERT INTO users (username, password_hash, chat_model) VALUES (?, ?, ?)",
+            (username, generate_password_hash(password), DEFAULT_CHAT_MODEL),
         )
         get_db().commit()
     except sqlite3.IntegrityError:
@@ -1306,8 +1345,13 @@ def stream_character_response(
         usage = {"input_tokens": 0, "output_tokens": 0}
         instructions = build_agent_instructions(character)
         try:
+            user = get_db().execute(
+                "SELECT chat_model FROM users WHERE id = ?", (session["user_id"],)
+            ).fetchone()
+            selected_model = user["chat_model"] if user else None
+            chat_model = selected_model if selected_model in CHAT_MODELS else DEFAULT_CHAT_MODEL
             response = ark.responses.create(
-                model=os.getenv("ARK_MODEL", "doubao-seed-character-260628"),
+                model=chat_model,
                 instructions=instructions,
                 input=[{"role": row["role"], "content": row["content"]} for row in history],
                 stream=True,

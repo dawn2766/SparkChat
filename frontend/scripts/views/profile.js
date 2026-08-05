@@ -6,6 +6,34 @@ import { createIcons, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm
 
 const refreshIcons = () => createIcons({ icons: { X } });
 
+async function bindChatModelSelector() {
+  const select = document.querySelector("#chat-model-select");
+  if (!select) return;
+  try {
+    const result = await api("/api/profile/models");
+    select.innerHTML = result.models.map((model) => `<option value="${esc(model.id)}">${esc(model.name)}</option>`).join("");
+    select.value = state.user.chatModel;
+    select.disabled = false;
+    select.dispatchEvent(new Event("change"));
+    select.onchange = async () => {
+      select.disabled = true;
+      try {
+        const result = await api("/api/profile/model", { method: "PATCH", body: JSON.stringify({ model: select.value }) });
+        state.user = result.user;
+        notify("聊天模型已更新");
+      } catch (error) {
+        select.value = state.user.chatModel;
+        notify(error.message);
+      } finally {
+        select.disabled = false;
+      }
+    };
+  } catch (error) {
+    select.innerHTML = `<option value="">模型列表加载失败</option>`;
+    notify(error.message);
+  }
+}
+
 function userRowsMarkup(users) {
   return users.map((user) => `<li class="user-admin-row" data-user-id="${user.id}"><div class="user-admin-identity"><strong>${esc(user.username)}</strong><span>${user.isAdmin ? "管理员" : "普通用户"}</span></div><div class="user-admin-actions">${user.id === state.user.id ? '<span class="current-user-tag">当前账号</span>' : `<button class="secondary-button compact-button admin-action-button" type="button" data-reset-password>设置密码</button><button class="danger-button compact-button admin-action-button" type="button" data-delete-user>删除</button>`}</div></li>`).join("");
 }
@@ -132,9 +160,10 @@ export function renderProfile({ bindShell, onLogout }) {
   const userDialog = managerDialogMarkup("user-manager-dialog", "用户管理", `<div class="dialog-body scroll-container"><form class="user-create-form" id="user-create-form"><div class="field"><label for="new-username">新用户账号</label><input class="text-input" id="new-username" name="username" minlength="3" maxlength="24" required autocomplete="off"></div><div class="field"><label for="new-password">初始密码</label><input class="text-input" id="new-password" name="password" type="password" minlength="4" maxlength="128" required autocomplete="new-password"></div><button class="primary-button admin-action-button" type="submit">添加用户</button></form><div class="user-list-head"><span class="field-label">现有用户</span></div><ul class="user-admin-list" data-user-list><li class="history-empty">正在加载用户…</li></ul></div>`, "user-manager-dialog");
   const voiceDialog = managerDialogMarkup("voice-manager-dialog", "音色管理", `<div class="admin-manager-body scroll-container"><div class="admin-manager-controls" data-voice-controls></div><section class="admin-voice-editor" data-voice-editor></section></div>`, "voice-manager-dialog");
   const roleDialog = managerDialogMarkup("role-manager-dialog", "角色管理", `<div class="admin-manager-body scroll-container"><div class="admin-manager-controls" data-role-controls></div><section class="admin-role-editor" data-role-editor></section></div>`, "role-manager-dialog");
-  app.innerHTML = shell(`<section class="page-heading"><div><h1>我的</h1></div></section><div class="main-page-body scroll-container"><section class="section profile-section"><div class="profile-card">${avatar({ name: state.user.username }, true)}<div><span class="profile-label">${state.user.isAdmin ? "管理员账号" : "当前账号"}</span><h2>${esc(state.user.username)}</h2></div></div>${adminEntries}<button class="danger-button full-width" id="logout">退出当前账号</button></section></div>${state.user.isAdmin ? userDialog + voiceDialog + roleDialog : ""}`, "profile");
+  app.innerHTML = shell(`<section class="page-heading"><div><h1>我的</h1></div></section><div class="main-page-body scroll-container"><section class="section profile-section"><div class="profile-card">${avatar({ name: state.user.username }, true)}<div><span class="profile-label">${state.user.isAdmin ? "管理员账号" : "当前账号"}</span><h2>${esc(state.user.username)}</h2></div></div><div class="profile-setting"><strong>聊天模型</strong><select class="select-input" id="chat-model-select" disabled><option>正在加载…</option></select></div>${adminEntries}<button class="danger-button full-width" id="logout">退出当前账号</button></section></div>${state.user.isAdmin ? userDialog + voiceDialog + roleDialog : ""}`, "profile");
   refreshIcons();
   bindShell();
+  bindChatModelSelector();
   if (state.user.isAdmin) {
     const openManager = async (buttonId, dialogId, binder) => {
       const dialog = document.querySelector(dialogId);

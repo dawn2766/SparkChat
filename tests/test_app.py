@@ -119,6 +119,38 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/admin/users/{user_id}").status_code, 200)
         self.assertEqual(self.client.delete("/api/admin/users/2").status_code, 409)
 
+    def test_user_can_select_supported_chat_model(self):
+        self.login()
+
+        available = self.client.get("/api/profile/models")
+        self.assertEqual(available.status_code, 200)
+        self.assertEqual(
+            available.json["models"],
+            [
+                {"id": "deepseek-v4-pro-260425", "name": "DeepSeek V4 Pro"},
+                {"id": "doubao-seed-character-260628", "name": "Doubao Seed Character"},
+            ],
+        )
+
+        updated = self.client.patch(
+            "/api/profile/model", json={"model": "deepseek-v4-pro-260425"}
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json["user"]["chatModel"], "deepseek-v4-pro-260425")
+        self.assertEqual(
+            self.client.get("/api/auth/me").json["user"]["chatModel"],
+            "deepseek-v4-pro-260425",
+        )
+
+        rejected = self.client.patch(
+            "/api/profile/model", json={"model": "unsupported-model"}
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/auth/me").json["user"]["chatModel"],
+            "deepseek-v4-pro-260425",
+        )
+
     def test_custom_character_delete_cascades_and_preset_is_protected(self):
         self.login()
         voice = self.client.get("/api/voices").json["voices"][0]
@@ -780,11 +812,22 @@ class SparkChatApiTest(unittest.TestCase):
         token_server.ark.responses = FakeResponses()
         try:
             self.login()
+            self.assertEqual(
+                self.client.patch(
+                    "/api/profile/model",
+                    json={"model": "doubao-seed-character-260628"},
+                ).status_code,
+                200,
+            )
             response = self.client.post("/api/characters/1/chat", json={"content": "测试"})
             list(response.response)
             self.assertEqual(captured["model"], "doubao-seed-character-260628")
         finally:
             token_server.ark.responses = original_responses
+
+    def test_memory_model_is_fixed_to_seed_pro(self):
+        from backend import app as token_server
+        self.assertEqual(token_server.MEMORY_MODEL, "doubao-seed-2-1-pro-260628")
 
     def test_character_conversations_are_isolated_sorted_and_renameable(self):
         from backend import app as token_server

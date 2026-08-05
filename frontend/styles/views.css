@@ -602,6 +602,28 @@
   text-transform: uppercase;
 }
 
+.profile-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.profile-setting strong {
+  display: block;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.profile-setting .select-control {
+  width: min(58%, 240px);
+  flex: 1 1 240px;
+}
+
 .profile-link {
   width: 100%;
   display: flex;
