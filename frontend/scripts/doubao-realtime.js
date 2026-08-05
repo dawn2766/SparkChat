@@ -52,7 +52,21 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let assistantSpokenText = "";
   let assistantQuestionId = "";
   let assistantReplyId = "";
+  let interruptedQuestionId = "";
+  let playbackInterrupted = false;
   const playbackNodes = new Set();
+
+  const interruptPlayback = () => {
+    clearTimeout(playbackTimer);
+    playbackNodes.forEach((node) => {
+      node.onended = null;
+      try { node.stop(); } catch (_error) { /* The source may already have ended. */ }
+      node.disconnect();
+    });
+    playbackNodes.clear();
+    nextPlaybackTime = audioContext.currentTime;
+    handlers.onPlaybackChange?.(false);
+  };
 
   const reportPlaybackState = () => {
     clearTimeout(playbackTimer);
@@ -64,7 +78,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   };
 
   const playPcm = (arrayBuffer) => {
-    if (closed || audioContext.state === "closed") return;
+    if (closed || playbackInterrupted || audioContext.state === "closed") return;
     const pcm = new Int16Array(arrayBuffer);
     const buffer = audioContext.createBuffer(1, pcm.length, outputRate);
     const channel = buffer.getChannelData(0);
@@ -87,13 +101,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   const stop = async () => {
     if (closed) return;
     closed = true;
-    clearTimeout(playbackTimer);
-    playbackNodes.forEach((node) => {
-      node.onended = null;
-      try { node.stop(); } catch (_error) { /* The source may already have ended. */ }
-      node.disconnect();
-    });
-    playbackNodes.clear();
+    interruptPlayback();
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "finish" }));
     processor?.disconnect();
     source?.disconnect();
@@ -116,15 +124,26 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         handlers.onError?.({ message: data.error || data.message || "豆包实时语音响应失败" });
         return;
       }
+      if (message.event === 450) {
+        interruptedQuestionId = String(data.question_id || "");
+        playbackInterrupted = true;
+        interruptPlayback();
+      }
       if (message.event === 451) {
         (data.results || []).forEach((result) => {
+          if (String(result.text || "").trim() && !playbackInterrupted) {
+            playbackInterrupted = true;
+            interruptPlayback();
+          }
           handlers.onTranscript?.({ text: result.text, interim: result.is_interim });
         });
       }
       if (message.event === 350 || message.event === 550) {
         const questionId = String(data.question_id || "");
         const replyId = String(data.reply_id || "");
-        if ((questionId && questionId !== assistantQuestionId) || (replyId && replyId !== assistantReplyId)) {
+        const startsNewReply = (questionId && questionId !== assistantQuestionId)
+          || (replyId && replyId !== assistantReplyId);
+        if (startsNewReply) {
           assistantQuestionId = questionId;
           assistantReplyId = replyId;
           assistantChatText = "";
@@ -136,6 +155,13 @@ export async function createRealtimeSession(character, handlers = {}, options = 
           if (!assistantSpokenText) handlers.onText?.(assistantChatText);
         }
         if (message.event === 350 && text) {
+          const resumesAfterInterrupt = interruptedQuestionId
+            ? questionId === interruptedQuestionId
+            : startsNewReply;
+          if (playbackInterrupted && resumesAfterInterrupt) {
+            playbackInterrupted = false;
+            interruptedQuestionId = "";
+          }
           const sentence = completeSubtitleSentence(text, config.language);
           const mergedText = mergeRealtimeText(assistantSpokenText, sentence);
           if (mergedText !== assistantSpokenText) {

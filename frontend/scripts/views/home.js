@@ -1,5 +1,8 @@
 import { app, avatar, esc, shell } from "../dom.js";
 import { state } from "../state.js";
+import { createIcons, Search } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+
+const refreshIcons = () => createIcons({ icons: { Search } });
 
 function formatTime(value) {
   if (!value) return "待连接";
@@ -8,12 +11,16 @@ function formatTime(value) {
 
 export function renderHome({ bindShell, openChat }) {
   const rows = state.characters.map((character) => `<button class="contact" data-character="${character.id}">${avatar(character)}<div class="contact-main"><div class="contact-top"><span class="contact-name">${esc(character.name)}</span><span class="contact-time">${formatTime(character.lastMessageAt)}</span></div><div class="contact-preview">${esc(character.lastMessage || "尚未建立对话")}</div></div></button>`).join("");
-  app.innerHTML = shell(`<section class="page-heading"><div><h1>联系人</h1></div></section><div class="main-page-body scroll-container"><label class="search-box" for="search"><span aria-hidden="true">⌕</span><input id="search" placeholder="搜索角色或最近消息" autocomplete="off"></label><div class="contact-list">${rows || '<div class="empty-state">暂无角色</div>'}</div></div>`, "home");
+  app.innerHTML = shell(`<section class="page-heading"><div><h1>联系人</h1></div></section><div class="main-page-body scroll-container"><div class="search-toolbar"><label class="search-box" for="search"><i data-lucide="search" aria-hidden="true"></i><input id="search" type="search" placeholder="搜索角色或最近消息" autocomplete="off" aria-label="搜索联系人"></label></div><div class="contact-list">${rows || '<div class="empty-state">暂无角色</div>'}</div></div>`, "home");
   bindShell();
+  refreshIcons();
   document.querySelectorAll("[data-character]").forEach((item) => {
     item.onclick = () => openChat(Number(item.dataset.character));
   });
-  document.querySelector("#search").oninput = (event) => {
+  const search = document.querySelector("#search");
+  search.onfocus = () => search.closest(".search-box").classList.add("focused");
+  search.onblur = () => search.closest(".search-box").classList.remove("focused");
+  search.oninput = (event) => {
     const keyword = event.target.value.toLowerCase();
     document.querySelectorAll(".contact").forEach((row) => {
       row.classList.toggle("hidden", !row.textContent.toLowerCase().includes(keyword));

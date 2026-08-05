@@ -73,31 +73,73 @@
   color: var(--accent);
 }
 
+.search-toolbar {
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
 .search-box {
-  height: 48px;
-  margin: 0 22px 13px;
+  height: 42px;
+  margin: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 0 12px;
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-raised);
+  cursor: text;
+  transition: border-color .18s, background .18s, box-shadow .18s;
 }
 
-.search-box:focus-within {
+.search-box:hover {
+  border-color: var(--line-strong);
+}
+
+.search-box:focus-within,
+.search-box.focused {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgb(216 243 93 / 10%);
 }
 
+.search-box:focus-within svg,
+.search-box.focused svg {
+  color: var(--accent);
+  stroke: var(--accent);
+}
+
 .search-box input {
+  min-width: 0;
   width: 100%;
   border: 0;
   outline: 0;
+  caret-color: var(--accent);
+  caret-shape: bar;
   color: var(--ink);
   background: transparent;
+  cursor: text;
   font-size: 16px;
+  line-height: 1.5;
+  appearance: none;
+}
+
+.search-box input::placeholder {
+  color: #65706b;
+}
+
+.search-box svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  stroke-width: 2.2;
+  pointer-events: none;
+  transition: color .18s;
+}
+
+.search-box input::-webkit-search-cancel-button {
+  appearance: none;
 }
 
 .contact-list {

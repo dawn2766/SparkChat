@@ -4,7 +4,6 @@ function closeSelect() {
   if (!openSelect) return;
   openSelect.wrapper.classList.remove("open");
   openSelect.button.setAttribute("aria-expanded", "false");
-  if (openSelect.menu.matches(":popover-open")) openSelect.menu.hidePopover();
   openSelect.menu.remove();
   openSelect = null;
 }
@@ -75,7 +74,6 @@ async function openMenu(select, wrapper, button) {
   const menu = document.createElement("div");
   menu.className = "select-menu";
   menu.id = `${select.id || wrapper.dataset.selectId}-menu`;
-  menu.setAttribute("popover", "manual");
   menu.setAttribute("role", "listbox");
 
   [...select.options].forEach((option, index) => {
@@ -99,9 +97,7 @@ async function openMenu(select, wrapper, button) {
     menu.append(item);
   });
 
-  const modal = wrapper.closest("dialog");
-  (modal || document.body).append(menu);
-  menu.showPopover();
+  (wrapper.closest("dialog") || document.body).append(menu);
   wrapper.classList.add("open");
   button.setAttribute("aria-expanded", "true");
   positionMenu(wrapper, menu);

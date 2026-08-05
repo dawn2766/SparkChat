@@ -18,15 +18,9 @@
 }
 
 @media (max-width: 430px) {
-  .page-heading,
   .section {
     padding-left: 16px;
     padding-right: 16px;
-  }
-
-  .search-box {
-    margin-left: 16px;
-    margin-right: 16px;
   }
 
   .contact {
