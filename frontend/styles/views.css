@@ -1521,7 +1521,8 @@
 .voice-history-page .voice-history-back {
   position: absolute;
   left: 8px;
-  top: env(safe-area-inset-top);
+  top: calc(env(safe-area-inset-top) + 24px);
+  transform: translateY(-50%);
 }
 
 .voice-history-page .messages {
