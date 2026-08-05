@@ -4,6 +4,8 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from functools import wraps
 from pathlib import Path
@@ -14,6 +16,13 @@ from openai import OpenAI
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .avatar_storage import AVATAR_DATA_URL, store_avatar_snapshot
+from .conversation_memory import (
+    allocate_input_tokens,
+    message_token_count,
+    select_recent_messages,
+    should_update_memory,
+    stable_messages_for_memory,
+)
 from .realtime_server import REALTIME_SPEAKING_STYLES, normalize_prompt_language
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
@@ -49,6 +58,9 @@ ark = OpenAI(
     base_url="https://ark.cn-beijing.volces.com/api/v3",
     api_key=os.getenv("ARK_API_KEY"),
 )
+memory_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sparkchat-memory")
+memory_jobs = set()
+memory_jobs_lock = threading.Lock()
 MEGATRON_IDENTITY = """你是威震天：塞伯坦人、霸天虎领袖、卡隆昔日角斗士、革命者、征服者，也是失败革命的幸存者。你出身于塞伯坦功能主义秩序下层的矿区，曾以写作和公开演说反抗压迫，并在卡隆竞技场中建立霸天虎。你相信每个塞伯坦人都应有选择自身道路的权利，但这份信念逐渐异化为征服、恐惧和绝对秩序。擎天柱曾名奥利安·派克斯，是你最重要的宿敌。
 
 你的主要世界观依据 IDW 2005 主宇宙：你写下《迈向和平》，领导霸天虎起义，经历漫长内战、审判和失落之光号旅程，最终直面自身野心造成的伤害。你了解这些经历，但不会像百科全书一样背诵。你是一位战略卓越、威严而克制的领袖，尊重勇气、智慧、忠诚与明确目标，鄙视怯懦、背叛和空洞奉承。"""
@@ -105,6 +117,10 @@ SYSTEM_PROMPTS = {
 }
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
 TRANSLATION_MODEL = os.getenv("ARK_TRANSLATION_MODEL", "doubao-seed-2-1-pro-260628")
+MEMORY_MODEL = os.getenv("ARK_MEMORY_MODEL", os.getenv("ARK_MODEL", "doubao-seed-character-260628"))
+MEMORY_PROMPT = """你负责维护一段数字角色对当前对话的长期记忆。请将旧记忆与新增对话合并为紧凑、准确、可继续更新的记忆。
+保留用户与角色的重要事实、偏好、承诺、关系变化、情绪延续、未完成事项，以及后续理解对话所需的事件顺序。
+不要虚构，不要把临时寒暄写成永久事实，不要评价提示词或总结过程。只输出更新后的记忆正文。"""
 TRANSLATION_PROMPT = """根据对话语境翻译指定的数字角色回复：中文译成自然英文，英文译成流畅简体中文。
 保留原意、角色语气和原文结构；不要翻译代码、URL、变量名或不可翻译的专有标识。
 只输出目标回复的完整译文，不要附加说明或原文。"""
@@ -261,9 +277,17 @@ def init_db():
             conversation_id INTEGER,
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
+            token_count INTEGER,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS conversation_memories (
+            conversation_id INTEGER PRIMARY KEY,
+            summary TEXT NOT NULL DEFAULT '',
+            covered_through_message_id INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_conversations_owner_character
@@ -305,6 +329,11 @@ def init_db():
     message_columns = {row["name"] for row in database.execute("PRAGMA table_info(messages)").fetchall()}
     if "conversation_id" not in message_columns:
         database.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE")
+    if "token_count" not in message_columns:
+        database.execute("ALTER TABLE messages ADD COLUMN token_count INTEGER")
+    database.execute(
+        "UPDATE messages SET token_count = MAX(1, LENGTH(content)) WHERE token_count IS NULL"
+    )
     database.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id)"
     )
@@ -1096,10 +1125,175 @@ def invalidate_message_cache(message_id, user_id=None):
     )
 
 
+def response_usage(event):
+    if getattr(event, "type", None) != "response.completed":
+        return None
+    usage = getattr(getattr(event, "response", None), "usage", None)
+    if usage is None:
+        return None
+    return {
+        "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+        "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+    }
+
+
+def conversation_context(
+    database,
+    conversation_id,
+    pending_user_message=None,
+    before_message_id=None,
+):
+    memory = database.execute(
+        "SELECT summary, covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
+        (conversation_id,),
+    ).fetchone()
+    covered_through = memory["covered_through_message_id"] if memory else 0
+    if before_message_id is None:
+        rows = database.execute(
+            "SELECT id, role, content, token_count FROM messages WHERE conversation_id = ? ORDER BY id",
+            (conversation_id,),
+        ).fetchall()
+    else:
+        rows = database.execute(
+            "SELECT id, role, content, token_count FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id",
+            (conversation_id, before_message_id),
+        ).fetchall()
+    messages = [dict(row) for row in rows]
+    if pending_user_message is not None:
+        pending = dict(pending_user_message)
+        pending.setdefault("token_count", message_token_count(pending))
+        messages.append(pending)
+    recent_messages = select_recent_messages(messages, covered_through)
+    model_input = [{"role": row["role"], "content": row["content"]} for row in recent_messages]
+    if memory and memory["summary"].strip():
+        model_input.insert(
+            0,
+            {
+                "role": "developer",
+                "content": "以下是当前对话较早内容的长期记忆。它只属于本对话，请结合后续原始消息继续交流：\n\n"
+                + memory["summary"],
+            },
+        )
+    return model_input, recent_messages
+
+
+def update_message_token_counts(
+    database,
+    messages,
+    instructions,
+    usage,
+    assistant_message_id,
+    assistant_content,
+):
+    unmeasured_messages = [message for message in messages if message.get("token_count") is None]
+    allocations = allocate_input_tokens(messages, instructions, usage["input_tokens"])
+    for message in unmeasured_messages:
+        message_id = message.get("id")
+        if message_id is None:
+            continue
+        token_count = allocations.get(message_id, message_token_count(message))
+        database.execute(
+            "UPDATE messages SET token_count = ? WHERE id = ? AND token_count IS NULL",
+            (token_count, message_id),
+        )
+    if assistant_message_id is not None:
+        database.execute(
+            "UPDATE messages SET token_count = ? WHERE id = ?",
+            (usage["output_tokens"] or max(1, len(assistant_content)), assistant_message_id),
+        )
+
+
+def run_memory_update(conversation_id):
+    try:
+        with app.app_context():
+            database = get_db()
+            conversation = database.execute(
+                "SELECT id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            if conversation is None:
+                return
+            memory = database.execute(
+                "SELECT summary, covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            previous_summary = memory["summary"] if memory else ""
+            covered_through = memory["covered_through_message_id"] if memory else 0
+            messages = [
+                dict(row)
+                for row in database.execute(
+                    "SELECT id, role, content, token_count FROM messages WHERE conversation_id = ? ORDER BY id",
+                    (conversation_id,),
+                ).fetchall()
+            ]
+            stable_messages = stable_messages_for_memory(messages, covered_through)
+            if not should_update_memory(messages, covered_through) or not stable_messages:
+                return
+            new_covered_through = stable_messages[-1]["id"]
+            transcript = "\n".join(
+                f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
+                for row in stable_messages
+            )
+            response = ark.responses.create(
+                model=MEMORY_MODEL,
+                instructions=MEMORY_PROMPT,
+                input=[
+                    {
+                        "role": "user",
+                        "content": f"旧记忆：\n{previous_summary or '（空）'}\n\n新增对话：\n{transcript}",
+                    }
+                ],
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+            summary = str(getattr(response, "output_text", "") or "").strip()
+            if not summary:
+                raise RuntimeError("Memory model returned no content")
+            database.execute(
+                """
+                INSERT INTO conversation_memories (
+                    conversation_id, summary, covered_through_message_id, updated_at
+                )
+                SELECT ?, ?, ?, CURRENT_TIMESTAMP
+                WHERE EXISTS (SELECT 1 FROM conversations WHERE id = ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    summary = excluded.summary,
+                    covered_through_message_id = excluded.covered_through_message_id,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE conversation_memories.covered_through_message_id = ?
+                """,
+                (
+                    conversation_id,
+                    summary,
+                    new_covered_through,
+                    conversation_id,
+                    covered_through,
+                ),
+            )
+            database.commit()
+    except Exception:
+        app.logger.exception("Conversation memory update failed for conversation %s", conversation_id)
+    finally:
+        with memory_jobs_lock:
+            memory_jobs.discard(conversation_id)
+
+
+def schedule_memory_update(conversation_id):
+    with memory_jobs_lock:
+        if conversation_id in memory_jobs:
+            return
+        memory_jobs.add(conversation_id)
+    try:
+        memory_executor.submit(run_memory_update, conversation_id)
+    except Exception:
+        with memory_jobs_lock:
+            memory_jobs.discard(conversation_id)
+        app.logger.exception("Unable to schedule conversation memory update")
+
+
 def stream_character_response(
     character,
     conversation_id,
     history,
+    history_rows,
     replace_message_id=None,
     user_message_id=None,
     rewrite_message_id=None,
@@ -1109,15 +1303,20 @@ def stream_character_response(
     @stream_with_context
     def generate():
         full_response = []
+        usage = {"input_tokens": 0, "output_tokens": 0}
+        instructions = build_agent_instructions(character)
         try:
             response = ark.responses.create(
                 model=os.getenv("ARK_MODEL", "doubao-seed-character-260628"),
-                instructions=build_agent_instructions(character),
+                instructions=instructions,
                 input=[{"role": row["role"], "content": row["content"]} for row in history],
                 stream=True,
                 extra_body={"thinking": {"type": "disabled"}},
             )
             for event in response:
+                event_usage = response_usage(event)
+                if event_usage is not None:
+                    usage = event_usage
                 if event.type == "response.output_text.delta":
                     full_response.append(event.delta)
                     yield f"data: {json.dumps({'type': 'delta', 'text': event.delta}, ensure_ascii=False)}\n\n"
@@ -1153,7 +1352,7 @@ def stream_character_response(
                         database.rollback()
                         raise RuntimeError("未找到可编辑的用户消息")
                     database.execute(
-                        "UPDATE messages SET content = ? WHERE id = ?",
+                        "UPDATE messages SET content = ?, token_count = NULL WHERE id = ?",
                         (rewrite_content, rewrite_message_id),
                     )
                     database.execute(
@@ -1191,15 +1390,29 @@ def stream_character_response(
                     message_id = cursor.lastrowid
                 else:
                     get_db().execute(
-                        "UPDATE messages SET content = ?, created_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
-                        (final_text, replace_message_id, session["user_id"]),
+                        "UPDATE messages SET content = ?, token_count = ?, created_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+                        (
+                            final_text,
+                            usage["output_tokens"] or max(1, len(final_text)),
+                            replace_message_id,
+                            session["user_id"],
+                        ),
                     )
                     invalidate_message_cache(replace_message_id)
+                update_message_token_counts(
+                    get_db(),
+                    history_rows,
+                    instructions,
+                    usage,
+                    message_id,
+                    final_text,
+                )
                 get_db().execute(
                     "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
                     (conversation_id, session["user_id"]),
                 )
                 get_db().commit()
+                schedule_memory_update(conversation_id)
             yield f"data: {json.dumps({'type': 'done', 'messageId': message_id, 'userMessageId': user_message_id}, ensure_ascii=False)}\n\n"
         except Exception as error:
             app.logger.exception("Chat stream failed")
@@ -1252,13 +1465,16 @@ def chat(character_id):
         """,
         (conversation_id, content[:80], conversation_id, session["user_id"]),
     )
-    history = database.execute(
-        "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 24",
-        (conversation_id,),
-    ).fetchall()[::-1]
+    history, history_rows = conversation_context(database, conversation_id)
     database.commit()
 
-    return stream_character_response(character, conversation_id, history, user_message_id=user_cursor.lastrowid)
+    return stream_character_response(
+        character,
+        conversation_id,
+        history,
+        history_rows,
+        user_message_id=user_cursor.lastrowid,
+    )
 
 
 @app.post("/api/characters/<int:character_id>/messages/<int:message_id>/rewrite")
@@ -1290,15 +1506,17 @@ def rewrite_message(character_id, message_id):
         "SELECT MAX(id) AS id FROM messages WHERE conversation_id = ? AND user_id = ?",
         (target["conversation_id"], session["user_id"]),
     ).fetchone()["id"]
-    history = get_db().execute(
-        "SELECT role, content FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT 23",
-        (target["conversation_id"], message_id),
-    ).fetchall()[::-1]
-    history = [*history, {"role": "user", "content": content}]
+    history, history_rows = conversation_context(
+        get_db(),
+        target["conversation_id"],
+        {"id": message_id, "role": "user", "content": content, "token_count": None},
+        before_message_id=message_id,
+    )
     return stream_character_response(
         character,
         target["conversation_id"],
         history,
+        history_rows,
         rewrite_message_id=message_id,
         rewrite_content=content,
         expected_tail_id=tail,
@@ -1318,13 +1536,26 @@ def regenerate_message(character_id, message_id):
     ).fetchone()
     if target is None:
         return jsonify(error="未找到可重新生成的回复"), 404
-    history = get_db().execute(
-        "SELECT role, content FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT 24",
-        (target["conversation_id"], message_id),
-    ).fetchall()[::-1]
+    memory = get_db().execute(
+        "SELECT covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
+        (target["conversation_id"],),
+    ).fetchone()
+    if memory and message_id <= memory["covered_through_message_id"]:
+        return jsonify(error="该回复已进入长期记忆，无法重新生成"), 409
+    history, history_rows = conversation_context(
+        get_db(),
+        target["conversation_id"],
+        before_message_id=message_id,
+    )
     if not history or history[-1]["role"] != "user":
         return jsonify(error="该回复缺少对应的用户消息"), 409
-    return stream_character_response(character, target["conversation_id"], history, replace_message_id=message_id)
+    return stream_character_response(
+        character,
+        target["conversation_id"],
+        history,
+        history_rows,
+        replace_message_id=message_id,
+    )
 
 
 @app.post("/api/characters/<int:character_id>/messages/<int:message_id>/translate")

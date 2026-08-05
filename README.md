@@ -49,6 +49,9 @@ DOUBAO_REALTIME_PUBLIC_WS=/sparkchat/realtime
 
 ARK_API_KEY=
 ARK_MODEL=doubao-seed-character-260628
+ARK_MEMORY_MODEL=doubao-seed-character-260628
+MEMORY_UPDATE_INTERVAL_TOKENS=44000
+RECENT_CONTEXT_MAX_TOKENS=48000
 FLASK_SECRET_KEY=请使用稳定的长随机字符串
 
 SPEECH_ENGINE_PORT=3101
@@ -58,6 +61,8 @@ COOKIE_SECURE=false
 ```
 
 文本角色回复使用火山方舟模型列表中的 `doubao-seed-character-260628`，也可以通过 `ARK_MODEL` 指定项目内已开通的同类接入点。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
+
+每个对话独立保存长期记忆。模型调用会携带长期记忆和连续的近期原文上下文；近期上下文只有 48000 token 上限，系统会从最新消息向前连续选取，尽可能接近该上限。长期记忆每新增约 44000 token 的稳定内容后在后台更新。上述阈值可通过环境变量调整，但必须保持 `0 < MEMORY_UPDATE_INTERVAL_TOKENS < RECENT_CONTEXT_MAX_TOKENS`。尚未进入长期记忆的消息始终会完整传入，即使后台更新延迟导致近期上下文临时超过上限，也不会丢失对话信息。已有消息会在数据库迁移时以字符数回填 token 数，后续模型返回的 usage 会更新未计量消息。
 
 音色属于数字角色，而不是独立的用户资源。系统通过 `/api/voices` 提供只读音色目录，角色记录中的 `voice_id` 保存真实豆包 speaker ID；预置角色的用户级覆盖也保存自己的 speaker ID。聊天朗读和端到端实时语音都直接读取同一角色 speaker，因此不存在 TTS 音色与实时音色的两套环境映射，也不提供自定义音色设计、声音复刻、训练状态、试听或重命名功能。
 
