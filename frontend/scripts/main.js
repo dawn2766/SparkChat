@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { bindCustomSelects } from "./custom-select.js";
 import { app } from "./dom.js";
 import { state } from "./state.js";
 import { renderAuth } from "./views/auth.js";
@@ -49,6 +50,7 @@ async function boot() {
 }
 
 app.setAttribute("data-app", "sparkchat");
+bindCustomSelects(app);
 boot();
 
 if ("serviceWorker" in navigator) {

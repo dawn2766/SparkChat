@@ -18,6 +18,10 @@
 }
 
 @media (max-width: 430px) {
+  .select-trigger {
+    min-height: 48px;
+  }
+
   .page-heading,
   .section {
     padding-left: 16px;
@@ -172,6 +176,10 @@
 
   .view {
     padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+
+  .view:has(.main-page-body) {
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
   }
 
   .chat-view {
