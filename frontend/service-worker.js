@@ -1,4 +1,4 @@
-const CACHE_NAME = "sparkchat-shell-v66";
+const CACHE_NAME = "sparkchat-shell-v67";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -12,8 +12,13 @@ const APP_SHELL = [
   "./scripts/dom.js",
   "./scripts/state.js",
   "./scripts/realtime-text.js",
+  "./scripts/doubao-realtime.js",
+  "./scripts/avatar-cropper.js",
   "./scripts/views/auth.js",
   "./scripts/views/home.js",
+  "./scripts/views/chat.js",
+  "./scripts/views/create.js",
+  "./scripts/views/profile.js",
   "./manifest.webmanifest",
   "./assets/images/sparkchat-logo.png",
   "./assets/icons/icon-192.png",
@@ -22,7 +27,21 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.all(
+        APP_SHELL.map(async (url) => {
+          try {
+            const response = await fetch(url, { cache: "no-cache" });
+            if (response.ok) {
+              await cache.put(url, response);
+            }
+          } catch (_error) {
+          }
+        })
+      );
+    })
+  );
   self.skipWaiting();
 });
 
@@ -49,11 +68,16 @@ self.addEventListener("fetch", (event) => {
         const networkResponse = fetch(request).then((response) => {
           if (response.ok) {
             const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+            event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy)));
           }
           return response;
         });
-        return cachedResponse || networkResponse.catch(() => caches.match("./index.html"));
+
+        if (cachedResponse) {
+          event.waitUntil(networkResponse.catch(() => undefined));
+          return cachedResponse;
+        }
+        return networkResponse.catch(() => caches.match("./index.html"));
       })
     );
     return;
@@ -61,17 +85,17 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
-      const networkResponse = fetch(request).then((response) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+
+      return fetch(request).then((response) => {
         if (response.ok) {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)));
         }
         return response;
       });
-
-      event.waitUntil(networkResponse.catch(() => undefined));
-
-      return cachedResponse || networkResponse;
     })
   );
 });
