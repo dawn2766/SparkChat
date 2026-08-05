@@ -1170,7 +1170,7 @@ def conversation_context(
             0,
             {
                 "role": "developer",
-                "content": "以下是当前对话较早内容的长期记忆。它只属于本对话，请结合后续原始消息继续交流：\n\n"
+                "content": "以下是对话早期内容的记忆摘要。请将其作为背景，并结合后续原始消息，保持对事实、关系与未完成事项的连续理解：\n\n"
                 + memory["summary"],
             },
         )
