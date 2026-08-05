@@ -758,7 +758,11 @@
 }
 
 .role-persona-input {
-  min-height: 180px;
+  min-height: 148px;
+}
+
+.character-prompt {
+  min-height: 148px;
 }
 
 .admin-editor-actions {

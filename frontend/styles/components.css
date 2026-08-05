@@ -24,7 +24,6 @@
 .view {
   min-height: 100vh;
   padding-bottom: 86px;
-  animation: rise .3s ease both;
 }
 
 .bottom-nav {
