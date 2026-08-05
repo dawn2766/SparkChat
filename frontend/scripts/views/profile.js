@@ -25,7 +25,6 @@ async function bindUserManager(dialog) {
         event.preventDefault();
         try {
           await api(`/api/admin/users/${userId}/password`, { method: "PATCH", body: JSON.stringify({ password: form.password.value }) });
-          notify("用户密码已更新");
           await bindUserManager(dialog);
         } catch (error) { notify(error.message); }
       };
@@ -41,7 +40,6 @@ async function bindUserManager(dialog) {
       button.disabled = true;
       try {
         await api(`/api/admin/users/${row.dataset.userId}`, { method: "DELETE" });
-        notify("用户已删除");
         await bindUserManager(dialog);
       } catch (error) { notify(error.message); button.disabled = false; }
     };
@@ -77,7 +75,6 @@ async function bindVoiceManager(dialog, selectedId = null) {
     const originalId = form.dataset.originalId;
     try {
       const response = await api(originalId ? `/api/admin/voices/${encodeURIComponent(originalId)}` : "/api/admin/voices", { method: originalId ? "PATCH" : "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-      notify(originalId ? "音色配置已更新" : "新音色已添加");
       await bindVoiceManager(dialog, response.voice.id);
     } catch (error) { notify(error.message); }
   };
@@ -115,7 +112,6 @@ async function bindRoleManager(dialog, selectedId = null) {
     const characterId = form.dataset.characterId;
     try {
       const result = await api(characterId ? `/api/admin/characters/${characterId}` : "/api/admin/characters", { method: characterId ? "PATCH" : "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-      notify(characterId ? "预置角色已更新并同步" : "预置角色已新增并同步");
       await bindRoleManager(dialog, result.character.id);
     } catch (error) { notify(error.message); }
   };
@@ -124,7 +120,6 @@ async function bindRoleManager(dialog, selectedId = null) {
     if (!await confirmDeletion({ title: "删除预置角色", name: selected.name, message: "该角色会从所有用户联系人中移除，相关对话也会删除。" })) return;
     try {
       await api(`/api/admin/characters/${selected.id}`, { method: "DELETE" });
-      notify("预置角色已删除并同步");
       await bindRoleManager(dialog);
     } catch (error) { notify(error.message); }
   };
@@ -158,7 +153,6 @@ export function renderProfile({ bindShell, onLogout }) {
       const form = event.currentTarget;
       try {
         await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-        notify("新用户已添加");
         form.reset();
         await bindUserManager(document.querySelector("#user-manager-dialog"));
       } catch (error) { notify(error.message); }

@@ -993,6 +993,15 @@
   animation: pulse 1.2s ease-in-out infinite;
 }
 
+.message.is-rewriting .bubble {
+  border-color: var(--line-strong);
+}
+
+.message.user.is-rewriting .bubble {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(216 243 93 / 12%);
+}
+
 .message.failed .bubble {
   color: var(--warning);
   border-color: rgb(255 138 101 / 40%);
@@ -1071,8 +1080,13 @@
   grid-template-columns: 50px minmax(0, 1fr) 0;
 }
 
-.chat-view.editing-message .messages {
-  opacity: .56;
+.chat-view.editing-message .message:not(.editing-target) {
+  opacity: .66;
+  transition: opacity 180ms ease;
+}
+
+.message.editing-target .bubble {
+  box-shadow: 0 0 0 2px rgb(216 243 93 / 18%);
 }
 
 .composer.editing-message {

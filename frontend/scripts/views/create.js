@@ -50,7 +50,6 @@ export function renderCreate({ bindShell, onCreated }) {
         method: "POST",
         body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))),
       });
-      notify("角色已加入联系人");
       await onCreated();
     } catch (error) {
       notify(error.message);

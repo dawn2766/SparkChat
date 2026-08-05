@@ -12,7 +12,7 @@ export function notify(text) {
   toast.textContent = text;
   toast.classList.remove("hidden");
   window.clearTimeout(notify.timer);
-  notify.timer = window.setTimeout(() => toast.classList.add("hidden"), 1800);
+  notify.timer = window.setTimeout(() => toast.classList.add("hidden"), 1000);
 }
 
 export function confirmDeletion({ title = "确认删除", name, message = "删除后将无法恢复。" }) {

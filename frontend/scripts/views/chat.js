@@ -114,38 +114,75 @@ async function rewriteUserMessage(messageId, content) {
     notify("消息仍在保存，请稍后再编辑");
     return;
   }
+  const container = document.querySelector("#messages");
+  const userMessage = container?.querySelector(`.message.user[data-message-id="${messageId}"]`);
+  const userBubble = userMessage?.querySelector(".bubble");
+  if (!container || !userMessage || !userBubble) {
+    notify("未找到要编辑的消息，请刷新后重试");
+    return;
+  }
+  const originalContent = userBubble.textContent;
+  let assistant = userMessage.nextElementSibling;
+  const hasExistingAssistant = Boolean(assistant && !assistant.classList.contains("user"));
+  const assistantSnapshot = hasExistingAssistant ? assistant.cloneNode(true) : null;
+  if (!hasExistingAssistant) {
+    assistant = document.createElement("div");
+    userMessage.after(assistant);
+  }
+
+  cancelUserMessageEdit();
   state.sending = true;
   const composer = document.querySelector("#composer");
-  composer?.classList.add("is-updating");
+  userBubble.textContent = content;
+  userMessage.dataset.originalContent = content;
+  userMessage.classList.add("is-rewriting");
+  assistant.className = "message pending is-rewriting";
+  assistant.removeAttribute("data-message-id");
+  assistant.innerHTML = '<div class="message-content"><div class="bubble">正在重新回应…</div><span class="stamp"></span></div>';
+  const assistantBubble = assistant.querySelector(".bubble");
   updateComposerState(composer?.content);
+  scrollMessages();
   try {
-    await streamChat(state.active.id, content, () => {}, messageId, state.activeConversation.id, true);
-    state.messages = (await api(`/api/characters/${state.active.id}/conversations/${state.activeConversation.id}/messages`)).messages;
-    state.conversations = (await api(`/api/characters/${state.active.id}/conversations`)).conversations;
-    state.activeConversation = state.conversations.find((item) => item.id === state.activeConversation.id) || state.activeConversation;
-    state.sending = false;
-    notify("聊天历史已更新");
-    renderChat({ onBack: window.__sparkchatBack });
-    restoreComposerDraft();
+    const result = await streamChat(state.active.id, content, (partial) => {
+      assistantBubble.textContent = partial;
+      assistant.classList.remove("pending");
+      scrollMessages();
+    }, messageId, state.activeConversation.id, true);
+    const userIndex = state.messages.findIndex((message) => message.id === messageId);
+    if (userIndex >= 0) {
+      state.messages[userIndex].content = content;
+      state.messages.splice(userIndex + 1, state.messages.length, { id: result.messageId, role: "assistant", content: result.answer });
+    }
+    if (userIndex === 0 && !state.activeConversation.titleCustom) {
+      state.activeConversation.title = content.slice(0, 80);
+    }
+    state.activeConversation.lastMessage = result.answer;
+    const conversation = state.conversations.find((item) => item.id === state.activeConversation.id);
+    if (conversation) Object.assign(conversation, state.activeConversation);
+    assistant.className = "message";
+    assistant.dataset.messageId = String(result.messageId || "");
+    assistant.dataset.originalContent = result.answer;
+    assistant.innerHTML = `<div class="message-content"><div class="bubble">${esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active, true)}</div>`;
+    container.querySelectorAll("[data-regenerate]").forEach((button) => {
+      if (!assistant.contains(button)) button.remove();
+    });
+    bindSpeechButtons();
   } catch (error) {
-    state.sending = false;
-    composer?.classList.remove("is-updating");
-    updateComposerState(composer?.content);
+    userBubble.textContent = originalContent;
+    userMessage.dataset.originalContent = originalContent;
+    if (assistantSnapshot) {
+      assistant.replaceWith(assistantSnapshot);
+      bindSpeechButtons();
+    } else {
+      assistant.remove();
+    }
     notify(error.message);
+  } finally {
+    state.sending = false;
+    userMessage.classList.remove("is-rewriting");
+    updateComposerState(composer?.content);
+    composer?.content.focus();
   }
-}
-
-function restoreComposerDraft() {
-  const composer = document.querySelector("#composer");
-  if (!composer) return;
-  const textarea = composer.content;
-  textarea.value = composerDraftBeforeEdit;
-  composerDraftBeforeEdit = "";
-  const hasDraft = textarea.value.trim().length > 0;
-  composer.classList.toggle("restore-composer-state", hasDraft);
-  resizeComposer(textarea);
-  updateComposerState(textarea);
-  if (hasDraft) requestAnimationFrame(() => composer.classList.remove("restore-composer-state"));
 }
 
 function cancelUserMessageEdit() {
@@ -157,6 +194,7 @@ function cancelUserMessageEdit() {
   delete composer.dataset.editMessageId;
   composer.classList.remove("editing-message", "is-updating");
   document.querySelector(".chat-view")?.classList.remove("editing-message");
+  document.querySelector(".message.editing-target")?.classList.remove("editing-target");
   textarea.placeholder = "输入消息…";
   const sendButton = composer.querySelector(".send");
   sendButton.setAttribute("aria-label", "发送");
@@ -172,6 +210,7 @@ function cancelUserMessageEdit() {
 
 function beginUserMessageEdit(message) {
   if (state.sending) return;
+  document.querySelector(".message.editing-target")?.classList.remove("editing-target");
   const original = message.dataset.originalContent || message.querySelector(".bubble")?.textContent || "";
   const composer = document.querySelector("#composer");
   const textarea = composer.content;
@@ -179,6 +218,7 @@ function beginUserMessageEdit(message) {
   composer.dataset.editMessageId = message.dataset.messageId;
   composer.classList.add("editing-message");
   document.querySelector(".chat-view")?.classList.add("editing-message");
+  message.classList.add("editing-target");
   textarea.value = original;
   textarea.placeholder = "修改消息…";
   const sendButton = composer.querySelector(".send");
@@ -283,7 +323,6 @@ function bindMessageActions() {
       if (index >= 0) state.messages[index].content = result.answer;
       message.dataset.originalContent = result.answer;
       message.classList.remove("pending");
-      notify("已生成新的回复");
     } catch (error) {
       bubble.textContent = oldText;
       const wasTranslated = oldText !== oldOriginalContent;
@@ -546,7 +585,6 @@ function bindSettings(onBack) {
         await api(`/api/characters/${state.active.id}`, { method: "DELETE" });
         dialog.close();
         state.characters = state.characters.filter((item) => item.id !== state.active.id);
-        notify("角色及其聊天记录已删除");
         await onBack();
       } catch (error) {
         notify(error.message);
@@ -573,7 +611,6 @@ function bindSettings(onBack) {
       const index = state.characters.findIndex((item) => item.id === result.character.id);
       if (index >= 0) state.characters[index] = { ...state.characters[index], ...result.character };
       dialog.close();
-      notify("角色配置已更新");
       renderChat({ onBack });
     } catch (error) {
       notify(error.message);
