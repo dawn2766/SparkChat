@@ -199,12 +199,11 @@ function cancelUserMessageEdit() {
   const sendButton = composer.querySelector(".send");
   sendButton.setAttribute("aria-label", "发送");
   sendButton.innerHTML = '<i data-lucide="send"></i>';
-  const hasDraft = textarea.value.trim().length > 0;
-  composer.classList.toggle("restore-composer-state", hasDraft);
+  composer.classList.add("restore-composer-state");
   resetTextareaSize(textarea);
   resizeComposer(textarea);
   updateComposerState(textarea);
-  if (hasDraft) requestAnimationFrame(() => composer.classList.remove("restore-composer-state"));
+  requestAnimationFrame(() => composer.classList.remove("restore-composer-state"));
   refreshIcons();
 }
 
@@ -509,6 +508,7 @@ async function sendMessage(event) {
     state.messages.push({ id: result.messageId, role: "assistant", content: result.answer });
     assistant.classList.remove("pending");
     assistant.dataset.messageId = result.messageId;
+    assistant.dataset.originalContent = result.answer;
     container.querySelectorAll("[data-regenerate]").forEach((button) => button.remove());
     assistant.querySelector(".stamp").outerHTML = assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active, true);
     bindSpeechButtons();
@@ -538,7 +538,7 @@ function voiceOptions(selectedId) {
 }
 
 function settingsMarkup(character) {
-  return `<dialog class="app-dialog character-dialog" id="character-dialog">
+  return `<dialog class="app-dialog character-dialog" id="character-dialog" tabindex="-1">
     <form class="dialog-panel" id="character-form">
       <header class="dialog-header"><div><h2>角色配置</h2></div></header>
       <div class="dialog-body scroll-container">
@@ -574,6 +574,7 @@ function bindSettings(onBack) {
   document.querySelector("#settings").onclick = () => {
     resetForm();
     dialog.showModal();
+    dialog.focus({ preventScroll: true });
   };
   dialog.querySelectorAll("[data-dialog-close]").forEach((button) => { button.onclick = cancelSettings; });
   const deleteButton = dialog.querySelector("[data-delete-character]");

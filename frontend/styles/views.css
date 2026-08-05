@@ -119,10 +119,6 @@
   transition: background .18s;
 }
 
-.contact:hover {
-  background: var(--surface);
-}
-
 .contact:focus-visible,
 .profile-link:focus-visible,
 .new-conversation-button:focus-visible,
@@ -464,10 +460,6 @@
   text-align: left;
 }
 
-.new-conversation-button:hover:not(:disabled) {
-  background: var(--accent-strong);
-}
-
 .new-conversation-button svg { width: 16px; height: 16px; }
 
 .conversation-list {
@@ -476,6 +468,11 @@
   padding: 11px 0 0;
   margin: 0;
   list-style: none;
+}
+
+.conversation-row.active {
+  border-color: var(--line);
+  background: var(--surface-raised);
 }
 
 .conversation-row {
@@ -487,7 +484,6 @@
   border-radius: var(--radius);
 }
 
-.conversation-row:hover,
 .conversation-row.active { border-color: var(--line); background: var(--surface-raised); }
 
 .conversation-open {
@@ -529,7 +525,6 @@
   border-radius: var(--radius);
 }
 
-.conversation-options-button:hover { color: var(--accent); background: var(--surface-soft); }
 .conversation-options-button svg { width: 16px; height: 16px; }
 
 .conversation-menu {
@@ -561,7 +556,6 @@
   white-space: nowrap;
 }
 
-.conversation-menu button:hover { background: var(--surface-soft); }
 .conversation-menu button.danger { color: var(--danger); }
 .conversation-menu svg { width: 14px; height: 14px; }
 
@@ -575,7 +569,6 @@
 
 .conversation-edit .text-input { min-width: 0; height: 32px; padding: 6px 8px; }
 .conversation-edit button { width: 30px; height: 30px; display: grid; place-items: center; color: var(--muted); background: transparent; border-radius: var(--radius); }
-.conversation-edit button:hover { color: var(--accent); background: var(--surface-soft); }
 .conversation-edit svg { width: 15px; height: 15px; }
 
 .history-empty { padding: 24px 10px; color: var(--muted); font-size: 12px; text-align: center; }
@@ -622,11 +615,6 @@
   border-radius: var(--radius);
   background: var(--surface);
   text-align: left;
-}
-
-.profile-link:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-raised);
 }
 
 .profile-link strong,
@@ -682,10 +670,6 @@
 .admin-create-button {
   min-height: 46px;
   padding-inline: 18px;
-}
-
-.admin-create-button:hover {
-  background: var(--accent-strong);
 }
 
 .admin-create-button span {
@@ -876,11 +860,6 @@
   cursor: pointer;
 }
 
-.user-bubble:hover {
-  border-color: var(--accent-strong);
-  box-shadow: 0 0 0 3px rgb(216 243 93 / 10%);
-}
-
 .profile-card h2 {
   margin: 0 0 5px;
   font-size: 17px;
@@ -890,6 +869,49 @@
   margin: 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .contact:hover {
+    background: var(--surface);
+  }
+
+  .new-conversation-button:hover:not(:disabled) {
+    background: var(--accent-strong);
+  }
+
+  .conversation-row:hover {
+    border-color: var(--line);
+    background: var(--surface-raised);
+  }
+
+  .conversation-options-button:hover {
+    color: var(--accent);
+    background: var(--surface-soft);
+  }
+
+  .conversation-menu button:hover {
+    background: var(--surface-soft);
+  }
+
+  .conversation-edit button:hover {
+    color: var(--accent);
+    background: var(--surface-soft);
+  }
+
+  .profile-link:hover {
+    border-color: var(--line-strong);
+    background: var(--surface-raised);
+  }
+
+  .admin-create-button:hover {
+    background: var(--accent-strong);
+  }
+
+  .user-bubble:hover {
+    border-color: var(--accent-strong);
+    box-shadow: 0 0 0 3px rgb(216 243 93 / 10%);
+  }
 }
 
 .chat-view {
@@ -1085,7 +1107,7 @@
 }
 
 .chat-view.editing-message .message:not(.editing-target) {
-  opacity: .66;
+  opacity: .42;
   transition: opacity 180ms ease;
 }
 
@@ -1097,7 +1119,7 @@
   grid-template-columns: minmax(0, 1fr) 50px;
   padding-top: 38px;
   border-top-color: var(--line-strong);
-  background: var(--surface);
+  background: var(--bg);
 }
 
 .composer.editing-message .composer-edit-header {

@@ -10,12 +10,6 @@
   font-size: 20px;
 }
 
-.icon-button:hover {
-  color: var(--ink);
-  border-color: var(--line);
-  background: var(--surface);
-}
-
 .icon-button svg {
   width: 18px;
   height: 18px;
@@ -53,11 +47,6 @@
   border-radius: var(--radius);
   font-size: var(--text-xs);
   font-weight: 600;
-}
-
-.nav-item:hover {
-  color: var(--ink);
-  background: var(--surface-raised);
 }
 
 .nav-item.active {
@@ -227,10 +216,6 @@
   background: var(--accent);
 }
 
-.primary-button:hover:not(:disabled) {
-  background: var(--accent-strong);
-}
-
 .primary-button:disabled {
   color: #6f7950;
   background: #343b27;
@@ -242,20 +227,10 @@
   background: var(--surface-soft);
 }
 
-.secondary-button:hover:not(:disabled) {
-  border-color: var(--muted);
-  background: #293130;
-}
-
 .danger-button {
   color: var(--danger);
   border: 1px solid rgb(240 104 98 / 40%);
   background: transparent;
-}
-
-.danger-button:hover:not(:disabled) {
-  border-color: var(--danger);
-  background: rgb(255 129 121 / 10%);
 }
 
 .secondary-button:disabled,
@@ -294,15 +269,44 @@
 .toast {
   max-width: calc(100vw - 32px);
   position: fixed;
-  z-index: 30;
+  z-index: 1000;
   top: max(18px, env(safe-area-inset-top));
   left: 50%;
+  margin: 0;
   padding: 11px 15px;
   transform: translateX(-50%);
+  border: 0;
   color: var(--accent-ink);
   background: var(--accent);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   font-size: var(--text-sm);
   font-weight: 700;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .icon-button:hover {
+    color: var(--ink);
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  .nav-item:hover {
+    color: var(--ink);
+    background: var(--surface-raised);
+  }
+
+  .primary-button:hover:not(:disabled) {
+    background: var(--accent-strong);
+  }
+
+  .secondary-button:hover:not(:disabled) {
+    border-color: var(--muted);
+    background: #293130;
+  }
+
+  .danger-button:hover:not(:disabled) {
+    border-color: var(--danger);
+    background: rgb(255 129 121 / 10%);
+  }
 }

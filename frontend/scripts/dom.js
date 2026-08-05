@@ -11,8 +11,16 @@ export const esc = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => 
 export function notify(text) {
   toast.textContent = text;
   toast.classList.remove("hidden");
+  const supportsPopover = typeof toast.showPopover === "function";
+  if (supportsPopover) {
+    if (toast.matches(":popover-open")) toast.hidePopover();
+    toast.showPopover();
+  }
   window.clearTimeout(notify.timer);
-  notify.timer = window.setTimeout(() => toast.classList.add("hidden"), 1000);
+  notify.timer = window.setTimeout(() => {
+    if (supportsPopover && toast.matches(":popover-open")) toast.hidePopover();
+    toast.classList.add("hidden");
+  }, 1000);
 }
 
 export function confirmDeletion({ title = "确认删除", name, message = "删除后将无法恢复。" }) {
