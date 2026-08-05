@@ -29,11 +29,45 @@ function positionMenu(wrapper, menu) {
     : `${Math.min(window.innerHeight - edge, rect.bottom + 5)}px`;
 }
 
-function openMenu(select, wrapper, button) {
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+function scrollableAncestors(element) {
+  const ancestors = [];
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const overflowY = getComputedStyle(parent).overflowY;
+    if (/(auto|scroll|overlay)/.test(overflowY) && parent.scrollHeight > parent.clientHeight) ancestors.push(parent);
+  }
+  return ancestors;
+}
+
+async function revealControl(wrapper) {
+  const margin = 12;
+  for (const ancestor of scrollableAncestors(wrapper)) {
+    const controlRect = wrapper.getBoundingClientRect();
+    const ancestorRect = ancestor.getBoundingClientRect();
+    const visibleTop = ancestorRect.top + margin;
+    const visibleBottom = ancestorRect.bottom - margin;
+    if (controlRect.top < visibleTop) ancestor.scrollTop -= visibleTop - controlRect.top;
+    else if (controlRect.bottom > visibleBottom) ancestor.scrollTop += controlRect.bottom - visibleBottom;
+    await nextFrame();
+  }
+
+  const controlRect = wrapper.getBoundingClientRect();
+  if (controlRect.top < margin) window.scrollBy({ top: controlRect.top - margin });
+  else if (controlRect.bottom > window.innerHeight - margin) {
+    window.scrollBy({ top: controlRect.bottom - window.innerHeight + margin });
+  }
+  await nextFrame();
+}
+
+async function openMenu(select, wrapper, button) {
   if (openSelect?.select === select) {
     closeSelect();
     return;
   }
+  await revealControl(wrapper);
   const controlRect = wrapper.getBoundingClientRect();
   if (!controlRect.width || !controlRect.height || button.disabled) return;
   closeSelect();
@@ -53,17 +87,20 @@ function openMenu(select, wrapper, button) {
     item.setAttribute("aria-selected", String(option.selected));
     item.disabled = option.disabled;
     item.textContent = option.textContent;
-    item.onclick = () => {
+    const chooseOption = () => {
+      if (item.disabled) return;
       select.selectedIndex = index;
       button.querySelector(".select-value").textContent = selectedLabel(select);
       select.dispatchEvent(new Event("change", { bubbles: true }));
       closeSelect();
       button.focus();
     };
+    item.onclick = chooseOption;
     menu.append(item);
   });
 
-  document.body.append(menu);
+  const modal = wrapper.closest("dialog");
+  (modal || document.body).append(menu);
   menu.showPopover();
   wrapper.classList.add("open");
   button.setAttribute("aria-expanded", "true");
@@ -92,11 +129,11 @@ function enhanceSelect(select) {
   button.setAttribute("aria-expanded", "false");
   button.innerHTML = `<span class="select-value"></span><span class="select-chevron" aria-hidden="true"></span>`;
   button.querySelector(".select-value").textContent = selectedLabel(select);
-  button.onclick = () => openMenu(select, wrapper, button);
+  button.onclick = () => { void openMenu(select, wrapper, button); };
   button.onkeydown = (event) => {
     if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
       event.preventDefault();
-      openMenu(select, wrapper, button);
+      void openMenu(select, wrapper, button);
     }
   };
   wrapper.append(button);

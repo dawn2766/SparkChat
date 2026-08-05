@@ -148,6 +148,7 @@
   width: 100%;
   min-width: 0;
   position: relative;
+  scroll-margin-block: 12px;
 }
 
 .select-trigger {

@@ -18,10 +18,6 @@
 }
 
 @media (max-width: 430px) {
-  .select-trigger {
-    min-height: 48px;
-  }
-
   .page-heading,
   .section {
     padding-left: 16px;
