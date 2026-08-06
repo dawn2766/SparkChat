@@ -51,8 +51,7 @@ ARK_API_KEY=
 MEMORY_UPDATE_INTERVAL_TOKENS=44000
 RECENT_CONTEXT_MAX_TOKENS=48000
 FLASK_SECRET_KEY=请使用稳定的长随机字符串
-INITIAL_ADMIN_USERNAME=首次初始化时创建的管理员账号，可留空
-INITIAL_ADMIN_PASSWORD=首次初始化时创建的管理员密码，至少 4 个字符，可留空
+# 首次初始化管理员时，在 .env 中添加 INITIAL_ADMIN_USERNAME 和 INITIAL_ADMIN_PASSWORD
 
 SPEECH_ENGINE_PORT=3101
 CLIENT_PORT=3002
@@ -60,13 +59,18 @@ CLIENT_HOST=127.0.0.1
 COOKIE_SECURE=false
 ```
 
+首次初始化数据库时，如需创建管理员，请在 `.env` 中配置 `INITIAL_ADMIN_USERNAME` 和
+`INITIAL_ADMIN_PASSWORD`。管理员账号长度必须为 3 至 24 个字符，密码长度必须为 4 至
+128 个字符。初始化完成后可以移除这两个环境变量；已有数据库中的管理员账号不会被覆盖或重置。
+如果配置的管理员账号已被占用，服务启动会明确报错，不会静默跳过创建。
+
 文本、记忆、翻译、TTS 和实时语音模型统一维护在 [backend/model_config.py](backend/model_config.py)，修改后重启服务即可生效。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
 
 每个对话独立保存长期记忆。模型调用会携带长期记忆和连续的近期原文上下文；近期上下文只有 48000 token 上限，系统会从最新消息向前连续选取，尽可能接近该上限。长期记忆每新增约 44000 token 的稳定内容后在后台更新。上述阈值可通过环境变量调整，但必须保持 `0 < MEMORY_UPDATE_INTERVAL_TOKENS < RECENT_CONTEXT_MAX_TOKENS`。尚未进入长期记忆的消息始终会完整传入，即使后台更新延迟导致近期上下文临时超过上限，也不会丢失对话信息。已有消息会在数据库迁移时以字符数回填 token 数，后续模型返回的 usage 会更新未计量消息。
 
 音色属于数字角色，而不是独立的用户资源。系统通过 `/api/voices` 提供只读音色目录，角色记录中的 `voice_id` 保存真实豆包 speaker ID；预置角色的用户级覆盖也保存自己的 speaker ID。聊天朗读和端到端实时语音都直接读取同一角色 speaker，因此不存在 TTS 音色与实时音色的两套环境映射，也不提供自定义音色设计、声音复刻、训练状态、试听或重命名功能。
 
-头像存储：上传头像在浏览器裁切为 512×512 JPEG 后，服务端将 data URL 解码为 `data/avatars/<sha256>.<ext>` 内容寻址文件，数据库只保存相对 URL（例如 `./media/avatars/<sha256>.jpg`）。媒体接口使用长期不可变缓存；文件名包含内容哈希，因此头像更新不会覆盖旧文件。预置威震天头像从 CaraLin 当前头像生成一次快照，之后 CaraLin 修改个人覆盖头像不会改变预置角色默认头像。
+头像存储：上传头像在浏览器裁切为 512×512 JPEG 后，服务端将 data URL 解码为 `data/avatars/<sha256>.<ext>` 内容寻址文件，数据库只保存相对 URL（例如 `./media/avatars/<sha256>.jpg`）。服务端限制单个头像文件不超过 5 MB，并使用临时文件安全写入。媒体接口使用长期不可变缓存；文件名包含内容哈希，因此头像更新不会覆盖旧文件。预置威震天头像从 CaraLin 当前头像生成一次快照，之后 CaraLin 修改个人覆盖头像不会改变预置角色默认头像。
 
 聊天朗读使用豆包 V3 HTTP Chunked TTS，模型和资源配置统一维护在 [backend/model_config.py](backend/model_config.py)，通过新版控制台 `X-Api-Key` 鉴权。实时 WebSocket 资源 ID 使用 `DOUBAO_REALTIME_RESOURCE_ID`，角色 speaker 由服务端按角色返回，API Key 不暴露给浏览器。
 
@@ -142,10 +146,11 @@ location /sparkchat/realtime {
 ## 验证
 
 ```powershell
-python -m unittest -v tests.test_app
+python -m unittest discover -v
 node tests/frontend/doubao-realtime.test.mjs
-Get-Content frontend/scripts/main.js | node --input-type=module --check
-Get-Content frontend/service-worker.js | node --input-type=module --check
+Get-ChildItem frontend -Recurse -Filter *.js | ForEach-Object {
+	Get-Content $_.FullName | node --input-type=module --check
+}
 ```
 
 PWA 安装与 service worker 仅在 HTTPS 或 `localhost` 安全上下文中启用。部署在 `/sparkchat/` 等子路径时，清单、API 和离线回退会沿当前应用路径解析。
