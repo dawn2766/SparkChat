@@ -5,6 +5,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from functools import wraps
@@ -60,10 +61,15 @@ ark = OpenAI(
     api_key=os.getenv("ARK_API_KEY"),
 )
 memory_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sparkchat-memory")
+persona_translation_executor = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="sparkchat-persona-translation"
+)
 memory_jobs = set()
 memory_jobs_lock = threading.Lock()
 voice_memory_jobs = set()
 voice_memory_jobs_lock = threading.Lock()
+persona_translation_jobs = set()
+persona_translation_jobs_lock = threading.Lock()
 
 CORE_SYSTEM_PROMPTS = {
     "zh": """回答要求：
@@ -102,12 +108,42 @@ SYSTEM_PROMPTS = {
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
 if DEFAULT_CHAT_MODEL not in CHAT_MODELS:
     raise RuntimeError("ARK_DEFAULT_CHAT_MODEL must be one of the supported chat models")
-MEMORY_PROMPT = """你负责维护一段数字角色对当前对话的长期记忆。请将旧记忆与新增对话合并为紧凑、准确、可继续更新的记忆。
+MEMORY_PROMPTS = {
+    "zh": """你负责维护一段数字角色对当前对话的长期记忆。请将旧记忆与新增对话合并为紧凑、准确、可继续更新的记忆。
 保留用户与角色的重要事实、偏好、承诺、关系变化、情绪延续、未完成事项，以及后续理解对话所需的事件顺序。
-不要虚构，不要把临时寒暄写成永久事实，不要评价提示词或总结过程。只输出更新后的记忆正文。"""
-TRANSLATION_PROMPT = """根据对话语境翻译指定的数字角色回复：中文译成自然英文，英文译成流畅简体中文。
+不要虚构，不要把临时寒暄写成永久事实，不要评价提示词或总结过程。只输出更新后的中文记忆正文。""",
+    "en": """Maintain the digital character's long-term memory of the conversation in fluent, natural English. Merge the previous memory and new dialogue into a compact, accurate memory that can be updated later.
+Retain important facts, preferences, promises, relationship changes, emotional continuity, unfinished matters, and the event order needed to understand later dialogue. If the source contains Chinese or other non-English text, translate its meaning naturally rather than copying it into the memory. Use established standard English forms for people's names, place names, organizations, titles, fictional terms, historical references, slogans, and signature lines when available; otherwise use a clear, consistent romanization or translation.
+Do not invent details, add translator notes, turn temporary small talk into permanent facts, discuss prompts, or describe the summarization process. Output only the updated memory in English.""",
+}
+MEMORY_PROMPT = MEMORY_PROMPTS["zh"]
+MEMORY_CONTEXT_PROMPTS = {
+    "zh": "以下是对话早期内容的记忆摘要。请将其作为背景，并结合后续原始消息，保持对事实、关系与未完成事项的连续理解：",
+    "en": "The following is a memory summary of the earlier conversation. Use it as background together with the subsequent original messages, preserving continuity of facts, relationships, and unfinished matters:",
+}
+TRANSLATION_PROMPTS = {
+    "zh": """根据对话语境，将指定的中文数字角色回复翻译成自然英文。
 保留原意、角色语气和原文结构；不要翻译代码、URL、变量名或不可翻译的专有标识。
-只输出目标回复的完整译文，不要附加说明或原文。"""
+只输出目标回复的完整译文，也就是完整英文译文，不要附加说明或原文。""",
+    "en": """Using the conversation context, translate the specified English digital-character reply into fluent Simplified Chinese.
+Preserve the meaning, character voice, and original structure. Do not translate code, URLs, variable names, or non-translatable identifiers.
+Output only the complete Chinese translation, without commentary or the original text.""",
+}
+TRANSLATION_PROMPT = TRANSLATION_PROMPTS["zh"]
+PERSONA_TRANSLATION_PROMPT = """Translate the character name and profile into fluent, natural English.
+
+Prioritize meaning that fits the context over word-for-word translation. Pay special attention to Chinese proper nouns, including people's names, place names, organizations, titles, fictional terms, historical references, and other terms with established standard English translations. Use the standard English form when one exists; otherwise choose a clear, consistent romanization or translation. Translate distinctive slogans, catchphrases, idioms, and signature lines accurately while keeping their original force and style. The English should read like an experienced human localization, not a mechanical translation.
+
+Keep the character's facts, tone, personality, and important nuances. Do not add explanations, translator notes, alternatives, or information that is not present in the input. Preserve paragraph breaks when they help readability.
+
+Output rules:
+1. Output exactly one valid JSON object.
+2. The object must contain exactly these two keys: \"name\" and \"persona\".
+3. Both values must be non-empty JSON strings.
+4. Output no Markdown fences, comments, extra keys, or text before or after the JSON.
+
+Output example:
+{"name":"Zhuge Liang","persona":"The strategist of Shu Han, known for the maxim \"To devote oneself utterly until one's final breath.\" He speaks with calm precision and rarely wastes a word."}"""
 CHARACTER_PROMPT_LABELS = {
     "zh": {"name": "角色名称", "persona": "身份背景"},
     "en": {"name": "Character name", "persona": "Identity and background"},
@@ -150,12 +186,34 @@ def realtime_websocket_url():
         return "/sparkchat/realtime"
     return configured_url
 
+def character_value(character, key, default=""):
+    if hasattr(character, "keys") and key in character.keys():
+        return character[key]
+    if isinstance(character, dict):
+        return character.get(key, default)
+    return default
+
+
+def is_english_text(text):
+    letters = [character for character in str(text or "") if character.isalpha()]
+    return bool(letters) and all(
+        "LATIN" in unicodedata.name(character, "") for character in letters
+    )
+
+
 def character_instructions(character, language=None):
-    language = normalize_prompt_language(language or character.get("language"))
+    language = normalize_prompt_language(language or character_value(character, "language"))
     labels = CHARACTER_PROMPT_LABELS[language]
+    name = character_value(character, "name")
+    persona = character_value(character, "persona")
+    if language == "en":
+        translated_name = character_value(character, "name_en")
+        translated_persona = character_value(character, "persona_en")
+        name = translated_name or name
+        persona = translated_persona or persona
     sections = [
-        f"{labels['name']}: {character['name']}",
-        f"{labels['persona']}: {character['persona']}",
+        f"{labels['name']}: {name}",
+        f"{labels['persona']}: {persona}",
     ]
     return "\n\n".join(sections)
 
@@ -222,6 +280,8 @@ def init_db():
             owner_id INTEGER,
             name TEXT NOT NULL,
             persona TEXT NOT NULL,
+            name_en TEXT,
+            persona_en TEXT,
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
             language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
@@ -235,6 +295,8 @@ def init_db():
             character_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             persona TEXT NOT NULL,
+            name_en TEXT,
+            persona_en TEXT,
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
             language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
@@ -271,6 +333,8 @@ def init_db():
             conversation_id INTEGER PRIMARY KEY,
             summary TEXT NOT NULL DEFAULT '',
             covered_through_message_id INTEGER NOT NULL DEFAULT 0,
+            covered_through_message_id_zh INTEGER NOT NULL DEFAULT 0,
+            covered_through_message_id_en INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
@@ -302,6 +366,8 @@ def init_db():
             conversation_id INTEGER PRIMARY KEY,
             summary TEXT NOT NULL DEFAULT '',
             covered_through_message_id INTEGER NOT NULL DEFAULT 0,
+            covered_through_message_id_zh INTEGER NOT NULL DEFAULT 0,
+            covered_through_message_id_en INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (conversation_id) REFERENCES voice_conversations(id) ON DELETE CASCADE
         );
@@ -373,11 +439,53 @@ def init_db():
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
     if "language" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+    if "name_en" not in character_columns:
+        database.execute("ALTER TABLE characters ADD COLUMN name_en TEXT")
+    if "persona_en" not in character_columns:
+        database.execute("ALTER TABLE characters ADD COLUMN persona_en TEXT")
     override_columns = {row["name"] for row in database.execute("PRAGMA table_info(character_overrides)").fetchall()}
     if "avatar_url" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''")
     if "language" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+    if "name_en" not in override_columns:
+        database.execute("ALTER TABLE character_overrides ADD COLUMN name_en TEXT")
+    if "persona_en" not in override_columns:
+        database.execute("ALTER TABLE character_overrides ADD COLUMN persona_en TEXT")
+    for table_name in ("conversation_memories", "voice_conversation_memories"):
+        columns = {row["name"] for row in database.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        if "summary_zh" not in columns:
+            database.execute(f"ALTER TABLE {table_name} ADD COLUMN summary_zh TEXT")
+        if "summary_en" not in columns:
+            database.execute(f"ALTER TABLE {table_name} ADD COLUMN summary_en TEXT")
+        if "covered_through_message_id_zh" not in columns:
+            database.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN covered_through_message_id_zh INTEGER NOT NULL DEFAULT 0"
+            )
+        if "covered_through_message_id_en" not in columns:
+            database.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN covered_through_message_id_en INTEGER NOT NULL DEFAULT 0"
+            )
+    database.execute(
+        "UPDATE conversation_memories SET summary_zh = summary WHERE summary_zh IS NULL"
+    )
+    database.execute(
+        "UPDATE voice_conversation_memories SET summary_zh = summary WHERE summary_zh IS NULL"
+    )
+    database.execute(
+        """
+        UPDATE conversation_memories
+        SET covered_through_message_id_zh = covered_through_message_id
+        WHERE covered_through_message_id_zh = 0 AND covered_through_message_id > 0
+        """
+    )
+    database.execute(
+        """
+        UPDATE voice_conversation_memories
+        SET covered_through_message_id_zh = covered_through_message_id
+        WHERE covered_through_message_id_zh = 0 AND covered_through_message_id > 0
+        """
+    )
     message_columns = {row["name"] for row in database.execute("PRAGMA table_info(messages)").fetchall()}
     if "conversation_id" not in message_columns:
         database.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE")
@@ -710,6 +818,136 @@ def character_values(payload, fallback=None):
     return name, persona, voice_id, voice["name"], language
 
 
+def parse_persona_translation(response_text):
+    text = str(response_text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    translated = json.loads(text)
+    name = str(translated.get("name", "")).strip()
+    persona = str(translated.get("persona", "")).strip()
+    if not name or not persona:
+        raise ValueError("Persona translation is missing required fields")
+    return name, persona
+
+
+def persona_translation_target(table_name, character_id, user_id=None):
+    if table_name == "characters":
+        return "id = ?", (character_id,)
+    if table_name == "character_overrides" and user_id is not None:
+        return "character_id = ? AND user_id = ?", (character_id, user_id)
+    raise ValueError("Unsupported persona translation target")
+
+
+def store_persona_translation(table_name, character_id, user_id, source_name, source_persona, name_en, persona_en):
+    where_sql, identifiers = persona_translation_target(table_name, character_id, user_id)
+    with app.app_context():
+        database = get_db()
+        try:
+            database.execute(
+                f"""
+                UPDATE {table_name}
+                SET name_en = ?, persona_en = ?
+                WHERE {where_sql} AND name = ? AND persona = ?
+                """,
+                (name_en, persona_en, *identifiers, source_name, source_persona),
+            )
+            database.commit()
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error).lower():
+                raise
+
+
+def run_persona_translation(table_name, character_id, user_id, source_name, source_persona, job_key):
+    try:
+        response = ark.responses.create(
+            model=TRANSLATION_MODEL,
+            instructions=PERSONA_TRANSLATION_PROMPT,
+            input=[{
+                "role": "user",
+                "content": json.dumps(
+                    {"name": source_name, "persona": source_persona},
+                    ensure_ascii=False,
+                ),
+            }],
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        name_en, persona_en = parse_persona_translation(
+            getattr(response, "output_text", "")
+        )
+        store_persona_translation(
+            table_name,
+            character_id,
+            user_id,
+            source_name,
+            source_persona,
+            name_en,
+            persona_en,
+        )
+    except Exception:
+        app.logger.exception(
+            "Persona translation failed for %s character %s", table_name, character_id
+        )
+    finally:
+        with persona_translation_jobs_lock:
+            persona_translation_jobs.discard(job_key)
+
+
+def schedule_persona_translation(table_name, character_id, source_name, source_persona, user_id=None):
+    if is_english_text(source_name) and is_english_text(source_persona):
+        store_persona_translation(
+            table_name,
+            character_id,
+            user_id,
+            source_name,
+            source_persona,
+            source_name,
+            source_persona,
+        )
+        return
+    job_key = (table_name, character_id, user_id, source_name, source_persona)
+    with persona_translation_jobs_lock:
+        if job_key in persona_translation_jobs:
+            return
+        persona_translation_jobs.add(job_key)
+    try:
+        persona_translation_executor.submit(
+            run_persona_translation,
+            table_name,
+            character_id,
+            user_id,
+            source_name,
+            source_persona,
+            job_key,
+        )
+    except Exception:
+        with persona_translation_jobs_lock:
+            persona_translation_jobs.discard(job_key)
+        app.logger.exception("Unable to schedule persona translation")
+
+
+def schedule_missing_persona_translations(database):
+    targets = [
+        ("characters", row["id"], None, row["name"], row["persona"])
+        for row in database.execute(
+            "SELECT id, name, persona FROM characters WHERE name_en IS NULL OR persona_en IS NULL"
+        ).fetchall()
+    ]
+    targets.extend(
+        ("character_overrides", row["character_id"], row["user_id"], row["name"], row["persona"])
+        for row in database.execute(
+            """
+            SELECT user_id, character_id, name, persona
+            FROM character_overrides
+            WHERE name_en IS NULL OR persona_en IS NULL
+            """
+        ).fetchall()
+    )
+    for table_name, character_id, user_id, name, persona in targets:
+        schedule_persona_translation(
+            table_name, character_id, name, persona, user_id
+        )
+
+
 @app.get("/api/admin/characters")
 @admin_required
 def list_preset_characters():
@@ -737,6 +975,9 @@ def create_preset_character():
         (*values, avatar_url),
     )
     get_db().commit()
+    schedule_persona_translation(
+        "characters", cursor.lastrowid, values[0], values[1]
+    )
     row = get_db().execute("SELECT * FROM characters WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return jsonify(character=serialize_character(row)), 201
 
@@ -765,6 +1006,15 @@ def update_preset_character(character_id):
     )
     database.execute("DELETE FROM character_overrides WHERE character_id = ?", (character_id,))
     database.commit()
+    if (
+        values[0] != character["name"]
+        or values[1] != character["persona"]
+        or not character_value(character, "name_en")
+        or not character_value(character, "persona_en")
+    ):
+        schedule_persona_translation(
+            "characters", character_id, values[0], values[1]
+        )
     row = database.execute("SELECT * FROM characters WHERE id = ?", (character_id,)).fetchone()
     return jsonify(character=serialize_character(row))
 
@@ -875,6 +1125,8 @@ def list_characters():
         SELECT c.id, c.owner_id, c.is_preset, c.created_at,
             COALESCE(o.name, c.name) AS name,
             COALESCE(o.persona, c.persona) AS persona,
+            CASE WHEN o.character_id IS NULL THEN c.name_en ELSE o.name_en END AS name_en,
+            CASE WHEN o.character_id IS NULL THEN c.persona_en ELSE o.persona_en END AS persona_en,
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
             COALESCE(o.voice_name, c.voice_name) AS voice_name,
             COALESCE(o.language, c.language) AS language,
@@ -936,6 +1188,12 @@ def create_character():
         ),
     )
     get_db().commit()
+    schedule_persona_translation(
+        "characters",
+        cursor.lastrowid,
+        payload["name"].strip(),
+        payload["persona"].strip(),
+    )
     row = get_db().execute("SELECT * FROM characters WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return jsonify(character=serialize_character(row)), 201
 
@@ -970,19 +1228,34 @@ def update_character(character_id):
         language,
         avatar_url,
     )
+    persona_unchanged = (
+        values[0] == character["name"] and values[1] == character["persona"]
+    )
     if character["is_preset"]:
+        inherited_name_en = character_value(character, "name_en") if persona_unchanged else None
+        inherited_persona_en = character_value(character, "persona_en") if persona_unchanged else None
         get_db().execute(
             """
             INSERT INTO character_overrides (
-                user_id, character_id, name, persona, voice_id, voice_name, language, avatar_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                user_id, character_id, name, persona, name_en, persona_en,
+                voice_id, voice_name, language, avatar_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, character_id) DO UPDATE SET
                 name = excluded.name, persona = excluded.persona,
+                name_en = excluded.name_en, persona_en = excluded.persona_en,
                 voice_id = excluded.voice_id, voice_name = excluded.voice_name,
                 language = excluded.language,
                 avatar_url = excluded.avatar_url
             """,
-            (session["user_id"], character_id, *values),
+            (
+                session["user_id"],
+                character_id,
+                values[0],
+                values[1],
+                inherited_name_en,
+                inherited_persona_en,
+                *values[2:],
+            ),
         )
     else:
         get_db().execute(
@@ -994,6 +1267,20 @@ def update_character(character_id):
             (*values, character_id, session["user_id"]),
         )
     get_db().commit()
+    has_english_persona = bool(
+        inherited_name_en and inherited_persona_en
+        if character["is_preset"]
+        else character_value(character, "name_en")
+        and character_value(character, "persona_en")
+    )
+    if not persona_unchanged or not has_english_persona:
+        schedule_persona_translation(
+            "character_overrides" if character["is_preset"] else "characters",
+            character_id,
+            values[0],
+            values[1],
+            session["user_id"] if character["is_preset"] else None,
+        )
     row = get_character(character_id)
     return jsonify(character=serialize_character(row))
 
@@ -1020,6 +1307,8 @@ def get_character(character_id):
         SELECT c.id, c.owner_id, c.is_preset, c.created_at,
             COALESCE(o.name, c.name) AS name,
             COALESCE(o.persona, c.persona) AS persona,
+            CASE WHEN o.character_id IS NULL THEN c.name_en ELSE o.name_en END AS name_en,
+            CASE WHEN o.character_id IS NULL THEN c.persona_en ELSE o.persona_en END AS persona_en,
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
             COALESCE(o.voice_name, c.voice_name) AS voice_name,
             COALESCE(o.language, c.language) AS language,
@@ -1194,9 +1483,17 @@ def create_voice_message(character_id, conversation_id):
     return jsonify(message=dict(row)), 201
 
 
-def voice_conversation_context(database, conversation_id):
+def memory_column(language, base_name):
+    language = normalize_prompt_language(language)
+    return f"{base_name}_{language}"
+
+
+def voice_conversation_context(database, conversation_id, language="zh"):
+    language = normalize_prompt_language(language)
+    summary_column = memory_column(language, "summary")
+    covered_column = memory_column(language, "covered_through_message_id")
     memory = database.execute(
-        "SELECT summary, covered_through_message_id FROM voice_conversation_memories WHERE conversation_id = ?",
+        f"SELECT {summary_column} AS summary, {covered_column} AS covered_through_message_id FROM voice_conversation_memories WHERE conversation_id = ?",
         (conversation_id,),
     ).fetchone()
     covered_through = memory["covered_through_message_id"] if memory else 0
@@ -1213,8 +1510,24 @@ def run_voice_memory_update(conversation_id):
     try:
         with app.app_context():
             database = get_db()
+            conversation = database.execute(
+                """
+                SELECT COALESCE(o.language, c.language) AS language
+                FROM voice_conversations vc
+                JOIN characters c ON c.id = vc.character_id
+                LEFT JOIN character_overrides o
+                    ON o.character_id = c.id AND o.user_id = vc.user_id
+                WHERE vc.id = ?
+                """,
+                (conversation_id,),
+            ).fetchone()
+            if conversation is None:
+                return
+            language = normalize_prompt_language(conversation["language"])
+            summary_column = memory_column(language, "summary")
+            covered_column = memory_column(language, "covered_through_message_id")
             memory = database.execute(
-                "SELECT summary, covered_through_message_id FROM voice_conversation_memories WHERE conversation_id = ?",
+                f"SELECT {summary_column} AS summary, {covered_column} AS covered_through_message_id FROM voice_conversation_memories WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
             previous_summary = memory["summary"] if memory else ""
@@ -1229,31 +1542,46 @@ def run_voice_memory_update(conversation_id):
             if not should_update_memory(messages, covered_through) or not stable_messages:
                 return
             new_covered_through = stable_messages[-1]["id"]
+            role_labels = ("用户", "数字角色") if language == "zh" else ("User", "Character")
             transcript = "\n".join(
-                f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
+                f"{role_labels[0] if row['role'] == 'user' else role_labels[1]}: {row['content']}"
                 for row in stable_messages
+            )
+            memory_input = (
+                f"旧记忆：\n{previous_summary or '（空）'}\n\n新增语音通话：\n{transcript}"
+                if language == "zh"
+                else f"Previous memory:\n{previous_summary or '(empty)'}\n\nNew voice conversation:\n{transcript}"
             )
             response = ark.responses.create(
                 model=MEMORY_MODEL,
-                instructions=MEMORY_PROMPT,
-                input=[{"role": "user", "content": f"旧记忆：\n{previous_summary or '（空）'}\n\n新增语音通话：\n{transcript}"}],
+                instructions=MEMORY_PROMPTS[language],
+                input=[{"role": "user", "content": memory_input}],
                 extra_body={"thinking": {"type": "disabled"}},
             )
             summary = str(getattr(response, "output_text", "") or "").strip()
             if not summary:
                 raise RuntimeError("Memory model returned no content")
             database.execute(
-                """
-                INSERT INTO voice_conversation_memories (conversation_id, summary, covered_through_message_id, updated_at)
-                SELECT ?, ?, ?, CURRENT_TIMESTAMP
+                f"""
+                INSERT INTO voice_conversation_memories (
+                    conversation_id, summary, covered_through_message_id,
+                    {summary_column}, {covered_column}, updated_at
+                )
+                SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
                 WHERE EXISTS (SELECT 1 FROM voice_conversations WHERE id = ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     summary = excluded.summary,
                     covered_through_message_id = excluded.covered_through_message_id,
+                    {summary_column} = excluded.{summary_column},
+                    {covered_column} = excluded.{covered_column},
                     updated_at = CURRENT_TIMESTAMP
-                WHERE voice_conversation_memories.covered_through_message_id = ?
+                WHERE voice_conversation_memories.{covered_column} = ?
                 """,
-                (conversation_id, summary, new_covered_through, conversation_id, covered_through),
+                (
+                    conversation_id, summary, new_covered_through,
+                    summary, new_covered_through,
+                    conversation_id, covered_through,
+                ),
             )
             database.commit()
     except Exception:
@@ -1279,7 +1607,8 @@ def schedule_voice_memory_update(conversation_id):
 @app.post("/api/characters/<int:character_id>/voice-messages/<int:message_id>/translate")
 @login_required
 def translate_voice_message(character_id, message_id):
-    if get_character(character_id) is None:
+    character = get_character(character_id)
+    if character is None:
         return jsonify(error="未找到该角色"), 404
     message = get_db().execute(
         """
@@ -1311,7 +1640,9 @@ def translate_voice_message(character_id, message_id):
             else:
                 response = ark.responses.create(
                     model=TRANSLATION_MODEL,
-                    instructions=TRANSLATION_PROMPT,
+                    instructions=TRANSLATION_PROMPTS[
+                        normalize_prompt_language(character["language"])
+                    ],
                     input=[{"role": "user", "content": "对话语境：\n" + "\n".join(
                         f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
                         for row in context[:-1]
@@ -1497,11 +1828,15 @@ def response_usage(event):
 def conversation_context(
     database,
     conversation_id,
+    language="zh",
     pending_user_message=None,
     before_message_id=None,
 ):
+    language = normalize_prompt_language(language)
+    summary_column = memory_column(language, "summary")
+    covered_column = memory_column(language, "covered_through_message_id")
     memory = database.execute(
-        "SELECT summary, covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
+        f"SELECT {summary_column} AS summary, {covered_column} AS covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
         (conversation_id,),
     ).fetchone()
     covered_through = memory["covered_through_message_id"] if memory else 0
@@ -1522,13 +1857,14 @@ def conversation_context(
         messages.append(pending)
     recent_messages = select_recent_messages(messages, covered_through)
     model_input = [{"role": row["role"], "content": row["content"]} for row in recent_messages]
-    if memory and memory["summary"].strip():
+    summary = memory["summary"].strip() if memory and memory["summary"] else ""
+    if summary:
         model_input.insert(
             0,
             {
                 "role": "developer",
-                "content": "以下是对话早期内容的记忆摘要。请将其作为背景，并结合后续原始消息，保持对事实、关系与未完成事项的连续理解：\n\n"
-                + memory["summary"],
+                "content": MEMORY_CONTEXT_PROMPTS[language] + "\n\n"
+                + summary,
             },
         )
     return model_input, recent_messages
@@ -1565,12 +1901,23 @@ def run_memory_update(conversation_id):
         with app.app_context():
             database = get_db()
             conversation = database.execute(
-                "SELECT id FROM conversations WHERE id = ?", (conversation_id,)
+                """
+                SELECT conv.id, COALESCE(o.language, c.language) AS language
+                FROM conversations conv
+                JOIN characters c ON c.id = conv.character_id
+                LEFT JOIN character_overrides o
+                    ON o.character_id = c.id AND o.user_id = conv.user_id
+                WHERE conv.id = ?
+                """,
+                (conversation_id,),
             ).fetchone()
             if conversation is None:
                 return
+            language = normalize_prompt_language(conversation["language"])
+            summary_column = memory_column(language, "summary")
+            covered_column = memory_column(language, "covered_through_message_id")
             memory = database.execute(
-                "SELECT summary, covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
+                f"SELECT {summary_column} AS summary, {covered_column} AS covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
             previous_summary = memory["summary"] if memory else ""
@@ -1586,17 +1933,23 @@ def run_memory_update(conversation_id):
             if not should_update_memory(messages, covered_through) or not stable_messages:
                 return
             new_covered_through = stable_messages[-1]["id"]
+            role_labels = ("用户", "数字角色") if language == "zh" else ("User", "Character")
             transcript = "\n".join(
-                f"{'用户' if row['role'] == 'user' else '数字角色'}：{row['content']}"
+                f"{role_labels[0] if row['role'] == 'user' else role_labels[1]}: {row['content']}"
                 for row in stable_messages
+            )
+            memory_input = (
+                f"旧记忆：\n{previous_summary or '（空）'}\n\n新增对话：\n{transcript}"
+                if language == "zh"
+                else f"Previous memory:\n{previous_summary or '(empty)'}\n\nNew dialogue:\n{transcript}"
             )
             response = ark.responses.create(
                 model=MEMORY_MODEL,
-                instructions=MEMORY_PROMPT,
+                instructions=MEMORY_PROMPTS[language],
                 input=[
                     {
                         "role": "user",
-                        "content": f"旧记忆：\n{previous_summary or '（空）'}\n\n新增对话：\n{transcript}",
+                        "content": memory_input,
                     }
                 ],
                 extra_body={"thinking": {"type": "disabled"}},
@@ -1605,20 +1958,25 @@ def run_memory_update(conversation_id):
             if not summary:
                 raise RuntimeError("Memory model returned no content")
             database.execute(
-                """
+                f"""
                 INSERT INTO conversation_memories (
-                    conversation_id, summary, covered_through_message_id, updated_at
+                    conversation_id, summary, covered_through_message_id,
+                    {summary_column}, {covered_column}, updated_at
                 )
-                SELECT ?, ?, ?, CURRENT_TIMESTAMP
+                SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
                 WHERE EXISTS (SELECT 1 FROM conversations WHERE id = ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     summary = excluded.summary,
                     covered_through_message_id = excluded.covered_through_message_id,
+                    {summary_column} = excluded.{summary_column},
+                    {covered_column} = excluded.{covered_column},
                     updated_at = CURRENT_TIMESTAMP
-                WHERE conversation_memories.covered_through_message_id = ?
+                WHERE conversation_memories.{covered_column} = ?
                 """,
                 (
                     conversation_id,
+                    summary,
+                    new_covered_through,
                     summary,
                     new_covered_through,
                     conversation_id,
@@ -1827,7 +2185,9 @@ def chat(character_id):
         """,
         (conversation_id, content[:80], conversation_id, session["user_id"]),
     )
-    history, history_rows = conversation_context(database, conversation_id)
+    history, history_rows = conversation_context(
+        database, conversation_id, character["language"]
+    )
     database.commit()
 
     return stream_character_response(
@@ -1871,6 +2231,7 @@ def rewrite_message(character_id, message_id):
     history, history_rows = conversation_context(
         get_db(),
         target["conversation_id"],
+        character["language"],
         {"id": message_id, "role": "user", "content": content, "token_count": None},
         before_message_id=message_id,
     )
@@ -1898,8 +2259,10 @@ def regenerate_message(character_id, message_id):
     ).fetchone()
     if target is None:
         return jsonify(error="未找到可重新生成的回复"), 404
+    language = normalize_prompt_language(character["language"])
+    covered_column = memory_column(language, "covered_through_message_id")
     memory = get_db().execute(
-        "SELECT covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
+        f"SELECT {covered_column} AS covered_through_message_id FROM conversation_memories WHERE conversation_id = ?",
         (target["conversation_id"],),
     ).fetchone()
     if memory and message_id <= memory["covered_through_message_id"]:
@@ -1907,6 +2270,7 @@ def regenerate_message(character_id, message_id):
     history, history_rows = conversation_context(
         get_db(),
         target["conversation_id"],
+        character["language"],
         before_message_id=message_id,
     )
     if not history or history[-1]["role"] != "user":
@@ -1923,7 +2287,8 @@ def regenerate_message(character_id, message_id):
 @app.post("/api/characters/<int:character_id>/messages/<int:message_id>/translate")
 @login_required
 def translate_message(character_id, message_id):
-    if get_character(character_id) is None:
+    character = get_character(character_id)
+    if character is None:
         return jsonify(error="未找到该角色"), 404
     message = get_assistant_message(character_id, message_id)
     if message is None:
@@ -1950,7 +2315,9 @@ def translate_message(character_id, message_id):
             else:
                 response = ark.responses.create(
                     model=TRANSLATION_MODEL,
-                    instructions=TRANSLATION_PROMPT,
+                    instructions=TRANSLATION_PROMPTS[
+                        normalize_prompt_language(character["language"])
+                    ],
                     input=[
                         {
                             "role": "user",
@@ -2096,16 +2463,32 @@ def get_token():
     if voice_conversation_id is not None:
         if get_voice_conversation(character_id, voice_conversation_id) is None:
             return jsonify(error="未找到该语音通话"), 404
-        summary, recent = voice_conversation_context(get_db(), voice_conversation_id)
+        language = realtime_config["language"]
+        summary, recent = voice_conversation_context(
+            get_db(), voice_conversation_id, language
+        )
         context_parts = []
+        display_name = (
+            character_value(character, "name_en") or character["name"]
+            if language == "en"
+            else character["name"]
+        )
         if summary:
-            context_parts.append(f"此前语音通话的长期记忆摘要：\n{summary}")
+            context_parts.append(
+                f"此前语音通话的长期记忆摘要：\n{summary}"
+                if language == "zh"
+                else f"Long-term memory summary of the earlier voice conversation:\n{summary}"
+            )
         if recent:
             transcript = "\n".join(
-                f"{'用户' if row['role'] == 'user' else character['name']}：{row['content']}"
+                f"{('用户' if row['role'] == 'user' else display_name) if language == 'zh' else ('User' if row['role'] == 'user' else display_name)}: {row['content']}"
                 for row in recent
             )
-            context_parts.append(f"当前语音会话最近的原文记录：\n{transcript}")
+            context_parts.append(
+                f"当前语音会话最近的原文记录：\n{transcript}"
+                if language == "zh"
+                else f"Recent original transcript of the current voice conversation:\n{transcript}"
+            )
         if context_parts:
             realtime_config["instructions"] += "\n\n" + "\n\n".join(context_parts)
     return jsonify(
@@ -2151,6 +2534,7 @@ def configure_pwa_headers(response):
 
 with app.app_context():
     init_db()
+    schedule_missing_persona_translations(get_db())
 
 
 if __name__ == "__main__":

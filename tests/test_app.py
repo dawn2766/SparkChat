@@ -697,6 +697,7 @@ class SparkChatApiTest(unittest.TestCase):
         instructions = build_agent_instructions(character)
 
         self.assertIn("Character name: 测试角色", instructions)
+        self.assertIn("Identity and background: 身份设定", instructions)
         self.assertIn("Response requirements:", instructions)
         self.assertIn("Every audible reply and every live transcript must be entirely in English", instructions)
         self.assertIn("regardless of the user's language", instructions)
@@ -1311,11 +1312,11 @@ class SparkChatApiTest(unittest.TestCase):
             self.assertEqual(second_events[0]["text"], "This is the translated reply.")
             self.assertEqual(first_events[-1]["type"], "done")
             self.assertEqual(second_events[-1]["type"], "done")
-            self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0]["model"], TRANSLATION_MODEL)
-            self.assertTrue(calls[0]["stream"])
-            self.assertIn("只输出目标回复的完整译文", calls[0]["instructions"])
-            translation_input = calls[0]["input"][0]["content"]
+            translation_calls = [call for call in calls if call.get("stream")]
+            self.assertEqual(len(translation_calls), 1)
+            self.assertEqual(translation_calls[0]["model"], TRANSLATION_MODEL)
+            self.assertIn("只输出目标回复的完整译文", translation_calls[0]["instructions"])
+            translation_input = translation_calls[0]["input"][0]["content"]
             self.assertIn("目标对话问题", translation_input)
             self.assertNotIn("其他对话内容不得进入翻译上下文", translation_input)
         finally:
