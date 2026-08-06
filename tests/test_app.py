@@ -18,12 +18,17 @@ from backend.model_config import (
 
 
 class SparkChatApiTest(unittest.TestCase):
+    TEST_VOICE_ID = "S_test_preset_voice"
+    TEST_VOICE_NAME = "测试预置音色"
+    TEST_CHARACTER_NAME = "测试预置角色"
+    TEST_CHARACTER_AVATAR = "./media/avatars/test-preset.webp"
+
     @classmethod
     def setUpClass(cls):
         cls.temp_dir = tempfile.TemporaryDirectory()
         os.environ["DATABASE_PATH"] = str(Path(cls.temp_dir.name) / "sparkchat.db")
         os.environ["FLASK_SECRET_KEY"] = "test-secret-key"
-        from backend.app import DATABASE_PATH, app
+        from backend.app import DATABASE_PATH, app, get_db
 
         cls.app = app
         cls.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
@@ -31,6 +36,43 @@ class SparkChatApiTest(unittest.TestCase):
             unittest.TestCase(),
             DATABASE_PATH.resolve(),
             (Path(cls.temp_dir.name) / "sparkchat.db").resolve(),
+        )
+        with cls.app.app_context():
+            database = get_db()
+            cls.assertEqual(unittest.TestCase(), database.execute("SELECT COUNT(*) FROM voices").fetchone()[0], 0)
+            cls.assertEqual(unittest.TestCase(), database.execute("SELECT COUNT(*) FROM characters").fetchone()[0], 0)
+        client = cls.app.test_client()
+        cls.assertEqual(
+            unittest.TestCase(),
+            client.post("/api/auth/login", json={"username": "Admin", "password": "123"}).status_code,
+            200,
+        )
+        cls.assertEqual(
+            unittest.TestCase(),
+            client.post(
+                "/api/admin/voices",
+                json={
+                    "name": cls.TEST_VOICE_NAME,
+                    "id": cls.TEST_VOICE_ID,
+                    "description": "测试用音色",
+                    "language": "zh",
+                },
+            ).status_code,
+            201,
+        )
+        cls.assertEqual(
+            unittest.TestCase(),
+            client.post(
+                "/api/admin/characters",
+                json={
+                    "name": cls.TEST_CHARACTER_NAME,
+                    "persona": "测试用预置角色设定",
+                    "voiceId": cls.TEST_VOICE_ID,
+                    "language": "zh",
+                    "avatarUrl": cls.TEST_CHARACTER_AVATAR,
+                },
+            ).status_code,
+            201,
         )
 
     @classmethod
@@ -55,23 +97,24 @@ class SparkChatApiTest(unittest.TestCase):
         self.login()
         response = self.client.get("/api/characters")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["characters"][0]["name"], "威震天")
+        self.assertEqual(response.json["characters"][0]["name"], self.TEST_CHARACTER_NAME)
         self.assertTrue(response.json["characters"][0]["isPreset"])
         self.assertEqual(
             response.json["characters"][0]["avatarUrl"],
-            "/assets/images/megatron-portrait.jpg",
+            self.TEST_CHARACTER_AVATAR,
         )
         self.assertNotIn("unreadCount", response.json["characters"][0])
 
     def test_preset_avatar_does_not_follow_later_caralin_changes(self):
-        from backend.app import PRESET_CHARACTER, get_db, init_db
+        from backend.app import get_db, init_db
 
         default_avatar = "data:image/webp;base64,REVGQVVMVA=="
         updated_caralin_avatar = "data:image/webp;base64,VVBEQVRFRA=="
         with self.app.app_context():
             database = get_db()
             character = database.execute(
-                "SELECT id FROM characters WHERE is_preset = 1 AND name = '威震天'"
+                "SELECT id FROM characters WHERE is_preset = 1 AND name = ?",
+                (self.TEST_CHARACTER_NAME,),
             ).fetchone()
             database.execute(
                 "UPDATE characters SET avatar_url = ? WHERE id = ?",
@@ -103,7 +146,7 @@ class SparkChatApiTest(unittest.TestCase):
                 )
                 database.execute(
                     "UPDATE characters SET avatar_url = ? WHERE id = ?",
-                    (PRESET_CHARACTER["avatar_url"], character["id"]),
+                    (self.TEST_CHARACTER_AVATAR, character["id"]),
                 )
                 database.commit()
 
@@ -250,7 +293,7 @@ class SparkChatApiTest(unittest.TestCase):
             json={
                 "name": "同步角色",
                 "persona": "初始设定",
-                "voiceId": "S_FOMpJ2Da2",
+                "voiceId": self.TEST_VOICE_ID,
                 "language": "zh",
             },
         )
@@ -258,17 +301,36 @@ class SparkChatApiTest(unittest.TestCase):
         character_id = created.json["character"]["id"]
         self.client.post("/api/auth/logout")
         self.login("CaraLin", "2766")
-        with self.app.app_context():
-            database = get_db()
-            database.execute(
-                """
-                INSERT INTO character_overrides (
-                    user_id, character_id, name, persona, voice_id, voice_name, language, avatar_url
-                ) VALUES (1, ?, '用户改名', '用户设定', 'S_FOMpJ2Da2', '赛博统帅（英文）', 'zh', '')
-                """,
-                (character_id,),
-            )
-            database.commit()
+        first_override = self.client.patch(
+            f"/api/characters/{character_id}",
+            json={
+                "name": "用户甲修改",
+                "persona": "用户甲设定",
+                "voiceId": self.TEST_VOICE_ID,
+                "voiceName": self.TEST_VOICE_NAME,
+                "language": "zh",
+            },
+        )
+        self.assertEqual(first_override.status_code, 200)
+
+        other_client = self.app.test_client()
+        registered = other_client.post(
+            "/api/auth/register",
+            json={"username": f"reset{uuid.uuid4().hex[:8]}", "password": "1234"},
+        )
+        self.assertEqual(registered.status_code, 201)
+        second_override = other_client.patch(
+            f"/api/characters/{character_id}",
+            json={
+                "name": "用户乙修改",
+                "persona": "用户乙设定",
+                "voiceId": self.TEST_VOICE_ID,
+                "voiceName": self.TEST_VOICE_NAME,
+                "language": "zh",
+            },
+        )
+        self.assertEqual(second_override.status_code, 200)
+
         self.client.post("/api/auth/logout")
         self.login("Admin", "123")
         updated = self.client.patch(
@@ -276,7 +338,7 @@ class SparkChatApiTest(unittest.TestCase):
             json={
                 "name": "同步角色新版",
                 "persona": "管理员最新设定",
-                "voiceId": "S_FOMpJ2Da2",
+                "voiceId": self.TEST_VOICE_ID,
                 "language": "zh",
             },
         )
@@ -292,6 +354,10 @@ class SparkChatApiTest(unittest.TestCase):
         listed = self.client.get("/api/characters").json["characters"]
         synced = next(character for character in listed if character["id"] == character_id)
         self.assertEqual(synced["name"], "同步角色新版")
+        other_listed = other_client.get("/api/characters").json["characters"]
+        other_synced = next(character for character in other_listed if character["id"] == character_id)
+        self.assertEqual(other_synced["name"], "同步角色新版")
+        self.assertEqual(other_synced["persona"], "管理员最新设定")
 
         self.client.post("/api/auth/logout")
         self.login("Admin", "123")
@@ -357,17 +423,14 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertTrue(json.loads(captured["additions"])["use_tag_parser"])
 
     def test_system_voice_catalog_is_read_only(self):
-        from backend.app import SYSTEM_VOICES
-
-        default_voice_id = SYSTEM_VOICES[0]["id"]
         self.login()
         voices = self.client.get("/api/voices")
         self.assertEqual(voices.status_code, 200)
         self.assertTrue(voices.json["voices"])
-        self.assertIn(default_voice_id, {voice["id"] for voice in voices.json["voices"]})
+        self.assertIn(self.TEST_VOICE_ID, {voice["id"] for voice in voices.json["voices"]})
         self.assertEqual(self.client.post("/api/voices/clone").status_code, 405)
         self.assertEqual(self.client.post("/api/voices/design").status_code, 405)
-        self.assertEqual(self.client.patch(f"/api/voices/{default_voice_id}").status_code, 405)
+        self.assertEqual(self.client.patch(f"/api/voices/{self.TEST_VOICE_ID}").status_code, 405)
 
     def test_admin_can_add_and_update_system_voice(self):
         from backend.app import get_db
@@ -1391,7 +1454,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(registered.status_code, 201)
         other_preset = other_client.get("/api/characters").json["characters"][0]
         self.assertEqual(other_preset["id"], preset_id)
-        self.assertNotEqual(other_preset["name"], "修改预设")
+        self.assertEqual(other_preset["name"], self.TEST_CHARACTER_NAME)
 
 
 if __name__ == "__main__":

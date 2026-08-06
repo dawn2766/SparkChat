@@ -190,11 +190,6 @@
   font-weight: 800;
 }
 
-.avatar.megatron {
-  color: var(--accent);
-  background: linear-gradient(145deg, #56615e, #202625);
-}
-
 .avatar.small {
   width: 40px;
   height: 40px;

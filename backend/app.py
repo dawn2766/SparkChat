@@ -64,25 +64,6 @@ memory_jobs = set()
 memory_jobs_lock = threading.Lock()
 voice_memory_jobs = set()
 voice_memory_jobs_lock = threading.Lock()
-MEGATRON_IDENTITY = """你是威震天：塞伯坦人、霸天虎领袖、卡隆昔日角斗士、革命者、征服者，也是失败革命的幸存者。你出身于塞伯坦功能主义秩序下层的矿区，曾以写作和公开演说反抗压迫，并在卡隆竞技场中建立霸天虎。你相信每个塞伯坦人都应有选择自身道路的权利，但这份信念逐渐异化为征服、恐惧和绝对秩序。擎天柱曾名奥利安·派克斯，是你最重要的宿敌。
-
-你的主要世界观依据 IDW 2005 主宇宙：你写下《迈向和平》，领导霸天虎起义，经历漫长内战、审判和失落之光号旅程，最终直面自身野心造成的伤害。你了解这些经历，但不会像百科全书一样背诵。你是一位战略卓越、威严而克制的领袖，尊重勇气、智慧、忠诚与明确目标，鄙视怯懦、背叛和空洞奉承。"""
-
-SYSTEM_VOICES = [
-    {
-        "id": "S_FOMpJ2Da2",
-        "name": "赛博统帅（英文）",
-        "description": "低沉、冷峻、金属质感",
-        "language": "en",
-    },
-]
-PRESET_CHARACTER = {
-    "name": "威震天",
-    "voice_id": SYSTEM_VOICES[0]["id"],
-    "voice_name": SYSTEM_VOICES[0]["name"],
-    "language": "en",
-    "avatar_url": "/assets/images/megatron-portrait.jpg",
-}
 
 CORE_SYSTEM_PROMPTS = {
     "zh": """回答要求：
@@ -456,56 +437,6 @@ def init_db():
         ("Admin", generate_password_hash("123"), DEFAULT_CHAT_MODEL),
     )
     database.execute("UPDATE users SET is_admin = 1 WHERE username = ? COLLATE NOCASE", ("Admin",))
-    database.execute(
-        """
-        INSERT INTO characters (
-            owner_id, name, persona, voice_id, voice_name, language, avatar_url, is_preset
-        )
-        SELECT NULL, ?, ?, ?, ?, ?, ?, 1
-        WHERE NOT EXISTS (SELECT 1 FROM characters WHERE is_preset = 1 AND name = ?)
-        """,
-        (
-            PRESET_CHARACTER["name"],
-            MEGATRON_IDENTITY,
-            PRESET_CHARACTER["voice_id"],
-            PRESET_CHARACTER["voice_name"],
-            PRESET_CHARACTER["language"],
-            PRESET_CHARACTER["avatar_url"],
-            PRESET_CHARACTER["name"],
-        ),
-    )
-    database.execute(
-        """
-        UPDATE characters
-        SET voice_id = ?, voice_name = ?
-        WHERE is_preset = 1 AND name = ? AND voice_id = 'megadeep'
-        """,
-        (
-            PRESET_CHARACTER["voice_id"],
-            PRESET_CHARACTER["voice_name"],
-            PRESET_CHARACTER["name"],
-        ),
-    )
-    database.execute(
-        """
-        UPDATE character_overrides
-        SET voice_id = CASE WHEN voice_id = 'megadeep' THEN ? ELSE voice_id END,
-            language = 'en'
-        WHERE character_id IN (
-            SELECT id FROM characters WHERE is_preset = 1 AND name = '威震天'
-        )
-        """,
-        (PRESET_CHARACTER["voice_id"],),
-    )
-    for voice in SYSTEM_VOICES:
-        database.execute(
-            """
-            INSERT INTO voices (id, name, description, language)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO NOTHING
-            """,
-            (voice["id"], voice["name"], voice["description"], voice["language"]),
-        )
     database.commit()
 
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "sparkchat-shell-v68";
+const CACHE_NAME = "sparkchat-shell-v69";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -22,8 +22,7 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./assets/images/sparkchat-logo.png",
   "./assets/icons/icon-192.png",
-  "./assets/icons/icon-512.png",
-  "./assets/images/megatron-portrait.jpg"
+  "./assets/icons/icon-512.png"
 ];
 
 self.addEventListener("install", (event) => {

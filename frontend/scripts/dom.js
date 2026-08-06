@@ -47,7 +47,7 @@ export function confirmDeletion({ title = "确认删除", name, message = "删�
 export function avatar(character, small = false) {
   const name = character?.name || "?";
   const image = character?.avatarUrl ? `<img src="${esc(character.avatarUrl)}" alt="">` : esc(name.slice(0, 1));
-  return `<div class="avatar ${!character?.avatarUrl && name === "威震天" ? "megatron" : ""} ${small ? "small" : ""}">${image}</div>`;
+  return `<div class="avatar ${small ? "small" : ""}">${image}</div>`;
 }
 
 export function shell(content, active = "home") {
