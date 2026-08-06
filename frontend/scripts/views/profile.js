@@ -103,6 +103,7 @@ async function bindVoiceManager(dialog, selectedId = null) {
     const originalId = form.dataset.originalId;
     try {
       const response = await api(originalId ? `/api/admin/voices/${encodeURIComponent(originalId)}` : "/api/admin/voices", { method: originalId ? "PATCH" : "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+      dialog.close();
       await bindVoiceManager(dialog, response.voice.id);
     } catch (error) { notify(error.message); }
   };
@@ -140,6 +141,7 @@ async function bindRoleManager(dialog, selectedId = null) {
     const characterId = form.dataset.characterId;
     try {
       const result = await api(characterId ? `/api/admin/characters/${characterId}` : "/api/admin/characters", { method: characterId ? "PATCH" : "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+      dialog.close();
       await bindRoleManager(dialog, result.character.id);
     } catch (error) { notify(error.message); }
   };
