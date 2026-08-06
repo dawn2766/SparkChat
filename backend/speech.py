@@ -6,10 +6,9 @@ import re
 import uuid
 from urllib import error, request
 
+from .model_config import TTS_MODEL, TTS_RESOURCE_ID
 
 SPEECH_CONSOLE_URL = "https://console.volcengine.com/speech/new"
-TTS_RESOURCE_ID = "seed-icl-2.0"
-TTS_MODEL = "seed-tts-2.0-expressive"
 
 
 STAGE_DIRECTION_PATTERN = re.compile(

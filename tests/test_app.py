@@ -5,6 +5,17 @@ import unittest
 import uuid
 from pathlib import Path
 
+from backend.model_config import (
+    CHAT_MODELS,
+    DEFAULT_CHAT_MODEL,
+    MEMORY_MODEL,
+    REALTIME_O2_MODEL,
+    REALTIME_SC2_MODEL,
+    TTS_MODEL,
+    TTS_RESOURCE_ID,
+    TRANSLATION_MODEL,
+)
+
 
 class SparkChatApiTest(unittest.TestCase):
     @classmethod
@@ -126,20 +137,17 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(available.status_code, 200)
         self.assertEqual(
             available.json["models"],
-            [
-                {"id": "deepseek-v4-pro-260425", "name": "DeepSeek V4 Pro"},
-                {"id": "doubao-seed-character-260628", "name": "Doubao Seed Character"},
-            ],
+            [{"id": model_id, "name": name} for model_id, name in CHAT_MODELS.items()],
         )
 
         updated = self.client.patch(
-            "/api/profile/model", json={"model": "deepseek-v4-pro-260425"}
+            "/api/profile/model", json={"model": next(iter(CHAT_MODELS))}
         )
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json["user"]["chatModel"], "deepseek-v4-pro-260425")
+        self.assertEqual(updated.json["user"]["chatModel"], next(iter(CHAT_MODELS)))
         self.assertEqual(
             self.client.get("/api/auth/me").json["user"]["chatModel"],
-            "deepseek-v4-pro-260425",
+            next(iter(CHAT_MODELS)),
         )
 
         rejected = self.client.patch(
@@ -148,7 +156,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(rejected.status_code, 400)
         self.assertEqual(
             self.client.get("/api/auth/me").json["user"]["chatModel"],
-            "deepseek-v4-pro-260425",
+            next(iter(CHAT_MODELS)),
         )
 
     def test_custom_character_delete_cascades_and_preset_is_protected(self):
@@ -320,8 +328,8 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(audio, b"audio")
         self.assertEqual(content_type, "audio/mpeg")
-        self.assertEqual(captured["resource_id"], "seed-icl-2.0")
-        self.assertEqual(captured["req_params"]["model"], "seed-tts-2.0-expressive")
+        self.assertEqual(captured["resource_id"], TTS_RESOURCE_ID)
+        self.assertEqual(captured["req_params"]["model"], TTS_MODEL)
         self.assertEqual(captured["req_params"]["language"], "en")
         self.assertEqual(captured["req_params"]["audio_params"]["speech_rate"], -8)
         headers = client._headers(captured["resource_id"])
@@ -349,40 +357,55 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertTrue(json.loads(captured["additions"])["use_tag_parser"])
 
     def test_system_voice_catalog_is_read_only(self):
+        from backend.app import SYSTEM_VOICES
+
+        default_voice_id = SYSTEM_VOICES[0]["id"]
         self.login()
         voices = self.client.get("/api/voices")
         self.assertEqual(voices.status_code, 200)
         self.assertTrue(voices.json["voices"])
-        self.assertEqual(voices.json["voices"][0]["id"], "S_FOMpJ2Da2")
+        self.assertIn(default_voice_id, {voice["id"] for voice in voices.json["voices"]})
         self.assertEqual(self.client.post("/api/voices/clone").status_code, 405)
         self.assertEqual(self.client.post("/api/voices/design").status_code, 405)
-        self.assertEqual(self.client.patch("/api/voices/S_FOMpJ2Da2").status_code, 405)
+        self.assertEqual(self.client.patch(f"/api/voices/{default_voice_id}").status_code, 405)
 
     def test_admin_can_add_and_update_system_voice(self):
-        self.login("Admin", "123")
-        created = self.client.post(
-            "/api/admin/voices",
-            json={
-                "name": "测试音色",
-                "id": "S_EOMpJ2Da2",
-                "description": "管理员测试音色",
-                "language": "zh",
-            },
-        )
-        self.assertEqual(created.status_code, 201)
-        self.assertEqual(created.json["voice"]["id"], "S_EOMpJ2Da2")
+        from backend.app import get_db
 
-        updated = self.client.patch(
-            "/api/admin/voices/S_EOMpJ2Da2",
-            json={"name": "测试音色新版", "id": "S_EOMpJ2Da2-new"},
-        )
-        self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json["voice"]["name"], "测试音色新版")
-        voice_ids = {
-            voice["id"] for voice in self.client.get("/api/voices").json["voices"]
-        }
-        self.assertIn("S_EOMpJ2Da2-new", voice_ids)
-        self.assertNotIn("S_EOMpJ2Da2", voice_ids)
+        original_voice_id = "S_admin_test_voice"
+        updated_voice_id = "S_admin_test_voice_updated"
+        self.login("Admin", "123")
+        try:
+            created = self.client.post(
+                "/api/admin/voices",
+                json={
+                    "name": "测试音色",
+                    "id": original_voice_id,
+                    "description": "管理员测试音色",
+                    "language": "zh",
+                },
+            )
+            self.assertEqual(created.status_code, 201)
+            self.assertEqual(created.json["voice"]["id"], original_voice_id)
+
+            updated = self.client.patch(
+                f"/api/admin/voices/{original_voice_id}",
+                json={"name": "测试音色新版", "id": updated_voice_id},
+            )
+            self.assertEqual(updated.status_code, 200)
+            self.assertEqual(updated.json["voice"]["name"], "测试音色新版")
+            voice_ids = {
+                voice["id"] for voice in self.client.get("/api/voices").json["voices"]
+            }
+            self.assertIn(updated_voice_id, voice_ids)
+            self.assertNotIn(original_voice_id, voice_ids)
+        finally:
+            with self.app.app_context():
+                get_db().execute(
+                    "DELETE FROM voices WHERE id IN (?, ?)",
+                    (original_voice_id, updated_voice_id),
+                )
+                get_db().commit()
 
     def test_non_admin_cannot_manage_system_voices(self):
         self.login()
@@ -430,8 +453,8 @@ class SparkChatApiTest(unittest.TestCase):
             "instructions": "Stay in character.",
         })
 
-        self.assertEqual(captured["resource_id"], "seed-icl-2.0")
-        self.assertEqual(realtime["dialog"]["extra"]["model"], "2.2.0.0")
+        self.assertEqual(captured["resource_id"], TTS_RESOURCE_ID)
+        self.assertEqual(realtime["dialog"]["extra"]["model"], REALTIME_SC2_MODEL)
         self.assertIn("character_manifest", realtime["dialog"])
 
     def test_speech_quota_error_returns_service_unavailable(self):
@@ -703,7 +726,7 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(payload["tts"]["speaker"], "S_test_voice")
         self.assertEqual(payload["tts"]["extra"]["explicit_language"], "en")
-        self.assertEqual(payload["dialog"]["extra"]["model"], "2.2.0.0")
+        self.assertEqual(payload["dialog"]["extra"]["model"], REALTIME_SC2_MODEL)
 
     def test_realtime_icl_v3_voice_uses_o2_session_payload(self):
         from backend.realtime_server import session_payload
@@ -716,7 +739,7 @@ class SparkChatApiTest(unittest.TestCase):
         })
 
         self.assertEqual(payload["tts"]["speaker"], "ICL_uranus_6a6d9cd9d9b89695")
-        self.assertEqual(payload["dialog"]["extra"]["model"], "2.1.0.0")
+        self.assertEqual(payload["dialog"]["extra"]["model"], REALTIME_O2_MODEL)
         self.assertEqual(
             payload["dialog"]["system_role"],
             "Use English.",
@@ -815,19 +838,19 @@ class SparkChatApiTest(unittest.TestCase):
             self.assertEqual(
                 self.client.patch(
                     "/api/profile/model",
-                    json={"model": "doubao-seed-character-260628"},
+                    json={"model": DEFAULT_CHAT_MODEL},
                 ).status_code,
                 200,
             )
             response = self.client.post("/api/characters/1/chat", json={"content": "测试"})
             list(response.response)
-            self.assertEqual(captured["model"], "doubao-seed-character-260628")
+            self.assertEqual(captured["model"], DEFAULT_CHAT_MODEL)
         finally:
             token_server.ark.responses = original_responses
 
     def test_memory_model_is_fixed_to_seed_pro(self):
         from backend import app as token_server
-        self.assertEqual(token_server.MEMORY_MODEL, "doubao-seed-2-1-pro-260628")
+        self.assertEqual(token_server.MEMORY_MODEL, MEMORY_MODEL)
 
     def test_character_conversations_are_isolated_sorted_and_renameable(self):
         from backend import app as token_server
@@ -1189,7 +1212,7 @@ class SparkChatApiTest(unittest.TestCase):
             self.assertEqual(first_events[-1]["type"], "done")
             self.assertEqual(second_events[-1]["type"], "done")
             self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0]["model"], "doubao-seed-2-1-pro-260628")
+            self.assertEqual(calls[0]["model"], TRANSLATION_MODEL)
             self.assertTrue(calls[0]["stream"])
             self.assertIn("只输出目标回复的完整译文", calls[0]["instructions"])
         finally:

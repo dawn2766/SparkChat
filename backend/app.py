@@ -23,6 +23,7 @@ from .conversation_memory import (
     should_update_memory,
     stable_messages_for_memory,
 )
+from .model_config import CHAT_MODELS, DEFAULT_CHAT_MODEL, MEMORY_MODEL, TRANSLATION_MODEL
 from .realtime_server import REALTIME_SPEAKING_STYLES, normalize_prompt_language
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
@@ -118,15 +119,8 @@ SYSTEM_PROMPTS = {
     for language, prompt in CORE_SYSTEM_PROMPTS.items()
 }
 SYSTEM_PROMPT = SYSTEM_PROMPTS["zh"]
-TRANSLATION_MODEL = os.getenv("ARK_TRANSLATION_MODEL", "doubao-seed-2-1-pro-260628")
-DEFAULT_CHAT_MODEL = os.getenv("ARK_DEFAULT_CHAT_MODEL", "doubao-seed-character-260628")
-CHAT_MODELS = {
-    "deepseek-v4-pro-260425": "DeepSeek V4 Pro",
-    "doubao-seed-character-260628": "Doubao Seed Character",
-}
 if DEFAULT_CHAT_MODEL not in CHAT_MODELS:
     raise RuntimeError("ARK_DEFAULT_CHAT_MODEL must be one of the supported chat models")
-MEMORY_MODEL = os.getenv("ARK_MEMORY_MODEL", "doubao-seed-2-1-pro-260628")
 MEMORY_PROMPT = """你负责维护一段数字角色对当前对话的长期记忆。请将旧记忆与新增对话合并为紧凑、准确、可继续更新的记忆。
 保留用户与角色的重要事实、偏好、承诺、关系变化、情绪延续、未完成事项，以及后续理解对话所需的事件顺序。
 不要虚构，不要把临时寒暄写成永久事实，不要评价提示词或总结过程。只输出更新后的记忆正文。"""

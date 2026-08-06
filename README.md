@@ -48,8 +48,6 @@ DOUBAO_REALTIME_RESOURCE_ID=volc.speech.dialog
 DOUBAO_REALTIME_PUBLIC_WS=/sparkchat/realtime
 
 ARK_API_KEY=
-ARK_MODEL=doubao-seed-character-260628
-ARK_MEMORY_MODEL=doubao-seed-character-260628
 MEMORY_UPDATE_INTERVAL_TOKENS=44000
 RECENT_CONTEXT_MAX_TOKENS=48000
 FLASK_SECRET_KEY=请使用稳定的长随机字符串
@@ -60,7 +58,7 @@ CLIENT_HOST=127.0.0.1
 COOKIE_SECURE=false
 ```
 
-文本角色回复使用火山方舟模型列表中的 `doubao-seed-character-260628`，也可以通过 `ARK_MODEL` 指定项目内已开通的同类接入点。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
+文本、记忆、翻译、TTS 和实时语音模型统一维护在 [backend/model_config.py](backend/model_config.py)，修改后重启服务即可生效。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
 
 每个对话独立保存长期记忆。模型调用会携带长期记忆和连续的近期原文上下文；近期上下文只有 48000 token 上限，系统会从最新消息向前连续选取，尽可能接近该上限。长期记忆每新增约 44000 token 的稳定内容后在后台更新。上述阈值可通过环境变量调整，但必须保持 `0 < MEMORY_UPDATE_INTERVAL_TOKENS < RECENT_CONTEXT_MAX_TOKENS`。尚未进入长期记忆的消息始终会完整传入，即使后台更新延迟导致近期上下文临时超过上限，也不会丢失对话信息。已有消息会在数据库迁移时以字符数回填 token 数，后续模型返回的 usage 会更新未计量消息。
 
@@ -68,9 +66,9 @@ COOKIE_SECURE=false
 
 头像存储：上传头像在浏览器裁切为 512×512 JPEG 后，服务端将 data URL 解码为 `data/avatars/<sha256>.<ext>` 内容寻址文件，数据库只保存相对 URL（例如 `./media/avatars/<sha256>.jpg`）。媒体接口使用长期不可变缓存；文件名包含内容哈希，因此头像更新不会覆盖旧文件。预置威震天头像从 CaraLin 当前头像生成一次快照，之后 CaraLin 修改个人覆盖头像不会改变预置角色默认头像。
 
-聊天朗读使用豆包 V3 HTTP Chunked TTS，资源 `seed-icl-2.0`、模型 `seed-tts-2.0-expressive`，统一通过新版控制台 `X-Api-Key` 鉴权。实时 WebSocket 资源 ID 使用 `DOUBAO_REALTIME_RESOURCE_ID`，角色 speaker 由服务端按角色返回，API Key 不暴露给浏览器。
+聊天朗读使用豆包 V3 HTTP Chunked TTS，模型和资源配置统一维护在 [backend/model_config.py](backend/model_config.py)，通过新版控制台 `X-Api-Key` 鉴权。实时 WebSocket 资源 ID 使用 `DOUBAO_REALTIME_RESOURCE_ID`，角色 speaker 由服务端按角色返回，API Key 不暴露给浏览器。
 
-文本聊天模型可在需要表现情绪、动作或细微表情时，在台词前生成简短括号舞台提示。聊天朗读不会读出提示，使用 `seed-tts-2.0-expressive` 和 `<cot>` 分段语音标签。端到端实时语音不使用括号协议，只将角色身份、回答规则和 `speaking_style` 发送给实时模型，由模型直接控制语音表现。
+文本聊天模型可在需要表现情绪、动作或细微表情时，在台词前生成简短括号舞台提示。聊天朗读不会读出提示，使用 `<cot>` 分段语音标签。端到端实时语音不使用括号协议，只将角色身份、回答规则和 `speaking_style` 发送给实时模型，由模型直接控制语音表现。
 
 若 API 未授权、资源未开通或额度不足，接口返回 `actionUrl`，前端会打开[豆包语音控制台](https://console.volcengine.com/speech/new)供管理员处理。
 

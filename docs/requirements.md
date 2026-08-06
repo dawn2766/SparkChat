@@ -53,7 +53,7 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 
 - 中文角色必须用中文回答，英文角色必须用英文回答；除准确性需要外，不因用户换语言而切换。
 - 通用规则负责角色一致性、回答长度、表达方式、知识边界和舞台提示使用方式；这些规则不得出现在角色配置字段中。
-- 文本回复调用 Ark 模型，默认模型为 `doubao-seed-character-260628`，可由 `ARK_MODEL` 覆盖。
+- 文本回复调用的模型统一维护在 `backend/model_config.py`，不通过环境变量覆盖。
 - 后端调用文本模型时传入 `thinking.type=disabled`；该参数属于 API 调用参数，不得把“关闭思考”或“不展示思考过程”等控制语句写入角色提示词。
 - 实时通话使用不含舞台提示规则的角色指令，并额外发送对应语言的 `speakingStyle`。
 
@@ -85,7 +85,7 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 ### 6.1 语音输入与文本朗读
 
 - 语音输入通过豆包实时语音代理完成 ASR，不使用浏览器系统 SpeechRecognition。浏览器采集单声道音频并重采样为 16 kHz PCM16；识别结果合并到输入框，不自动发送。
-- 文本朗读使用豆包 V3 HTTP Chunked TTS，资源为 `seed-icl-2.0`，模型为 `seed-tts-2.0-expressive`，输出为 24 kHz MP3，默认语速为 `-8`。
+- 文本朗读使用豆包 V3 HTTP Chunked TTS，模型和资源统一维护在 `backend/model_config.py`，输出为 24 kHz MP3，默认语速为 `-8`。
 - 模型可以使用简短括号、方括号、书名括号或星号舞台提示表达动作、心理或细微表情，但不得用提示代替回答或连续堆叠。
 - TTS 不直接读出舞台提示，而是将其转换为 `<cot>` 分段语音标签。
 - 消息朗读只接受当前消息原文或已缓存译文；自由文本朗读不写入消息语音缓存。
@@ -159,7 +159,6 @@ Get-Content frontend/service-worker.js | node --input-type=module --check
 ```dotenv
 DOUBAO_SPEECH_API_KEY=...
 ARK_API_KEY=...
-ARK_MODEL=doubao-seed-character-260628
 FLASK_SECRET_KEY=请使用稳定的长随机字符串
 DOUBAO_REALTIME_RESOURCE_ID=volc.speech.dialog
 DOUBAO_REALTIME_PUBLIC_WS=/sparkchat/realtime

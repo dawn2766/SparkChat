@@ -19,6 +19,7 @@ from .realtime_protocol import (
     decode_event,
     encode_event,
 )
+from .model_config import REALTIME_LEGACY_MODEL, REALTIME_O2_MODEL, REALTIME_SC2_MODEL
 
 load_dotenv()
 
@@ -75,14 +76,14 @@ def session_payload(config):
     if is_sc2_voice:
         payload["dialog"] = {
             "character_manifest": f"{instructions}\n\n{SPEAKING_STYLE_LABELS[language]}: {speaking_style}",
-            "extra": {"model": "2.2.0.0", "input_mod": "keep_alive"},
+            "extra": {"model": REALTIME_SC2_MODEL, "input_mod": "keep_alive"},
         }
     else:
         payload["dialog"] = {
             "bot_name": config.get("name", "数字角色")[:20],
             "system_role": instructions,
             "speaking_style": speaking_style,
-            "extra": {"model": "2.1.0.0" if is_o2_clone else "1.2.1.1", "input_mod": "keep_alive"},
+            "extra": {"model": REALTIME_O2_MODEL if is_o2_clone else REALTIME_LEGACY_MODEL, "input_mod": "keep_alive"},
         }
     return payload
 
