@@ -55,7 +55,6 @@ class SparkChatApiTest(unittest.TestCase):
                     "name": cls.TEST_VOICE_NAME,
                     "id": cls.TEST_VOICE_ID,
                     "description": "测试用音色",
-                    "language": "zh",
                 },
             ).status_code,
             201,
@@ -428,9 +427,26 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(voices.status_code, 200)
         self.assertTrue(voices.json["voices"])
         self.assertIn(self.TEST_VOICE_ID, {voice["id"] for voice in voices.json["voices"]})
+        self.assertTrue(all("language" not in voice for voice in voices.json["voices"]))
         self.assertEqual(self.client.post("/api/voices/clone").status_code, 405)
         self.assertEqual(self.client.post("/api/voices/design").status_code, 405)
         self.assertEqual(self.client.patch(f"/api/voices/{self.TEST_VOICE_ID}").status_code, 405)
+
+    def test_database_migration_removes_voice_language_column(self):
+        from backend.app import get_db, init_db
+
+        with self.app.app_context():
+            database = get_db()
+            database.execute("ALTER TABLE voices ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+            database.commit()
+            init_db()
+            columns = {
+                row["name"] for row in database.execute("PRAGMA table_info(voices)").fetchall()
+            }
+            self.assertNotIn("language", columns)
+            self.assertIsNotNone(
+                database.execute("SELECT id FROM voices WHERE id = ?", (self.TEST_VOICE_ID,)).fetchone()
+            )
 
     def test_admin_can_add_and_update_system_voice(self):
         from backend.app import get_db
@@ -445,7 +461,6 @@ class SparkChatApiTest(unittest.TestCase):
                     "name": "测试音色",
                     "id": original_voice_id,
                     "description": "管理员测试音色",
-                    "language": "zh",
                 },
             )
             self.assertEqual(created.status_code, 201)

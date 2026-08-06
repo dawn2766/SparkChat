@@ -215,7 +215,6 @@ def init_db():
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS characters (
@@ -355,6 +354,22 @@ def init_db():
         "UPDATE users SET chat_model = ? WHERE chat_model IS NULL OR chat_model NOT IN (?, ?)",
         (DEFAULT_CHAT_MODEL, *CHAT_MODELS),
     )
+    voice_columns = {row["name"] for row in database.execute("PRAGMA table_info(voices)").fetchall()}
+    if "language" in voice_columns:
+        database.executescript(
+            """
+            CREATE TABLE voices_without_language (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO voices_without_language (id, name, description, created_at)
+            SELECT id, name, description, created_at FROM voices;
+            DROP TABLE voices;
+            ALTER TABLE voices_without_language RENAME TO voices;
+            """
+        )
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
     if "language" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
@@ -652,14 +667,14 @@ def delete_user(user_id):
 @login_required
 def list_voices():
     rows = get_db().execute(
-        "SELECT id, name, description, language FROM voices ORDER BY created_at, id"
+        "SELECT id, name, description FROM voices ORDER BY created_at, id"
     ).fetchall()
     return jsonify(voices=[dict(row) for row in rows])
 
 
 def system_voice(voice_id):
     return get_db().execute(
-        "SELECT id, name, description, language FROM voices WHERE id = ?", (voice_id,)
+        "SELECT id, name, description FROM voices WHERE id = ?", (voice_id,)
     ).fetchone()
 
 
@@ -759,16 +774,13 @@ def voice_values(payload):
     voice_id = str(payload.get("id", "")).strip()
     name = str(payload.get("name", "")).strip()
     description = str(payload.get("description", "")).strip()
-    language = str(payload.get("language", "zh")).strip()
     if not name or not voice_id:
         raise ValueError("请填写音色名称和 speaker_id")
     if len(name) > 40 or len(voice_id) > 120 or len(description) > 120:
         raise ValueError("音色名称、speaker_id 或描述超过长度限制")
     if not voice_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")):
         raise ValueError("speaker_id 格式无效")
-    if language not in {"zh", "en"}:
-        raise ValueError("音色语言仅支持中文或英文")
-    return voice_id, name, description, language
+    return voice_id, name, description
 
 
 @app.post("/api/admin/voices")
@@ -780,7 +792,7 @@ def create_system_voice():
         return jsonify(error=str(error)), 400
     try:
         get_db().execute(
-            "INSERT INTO voices (id, name, description, language) VALUES (?, ?, ?, ?)",
+            "INSERT INTO voices (id, name, description) VALUES (?, ?, ?)",
             values,
         )
         get_db().commit()
@@ -799,14 +811,13 @@ def update_system_voice(voice_id):
     payload = request.get_json(silent=True) or {}
     payload.setdefault("id", voice_id)
     payload.setdefault("description", current["description"])
-    payload.setdefault("language", current["language"])
     try:
         values = voice_values(payload)
     except ValueError as error:
         return jsonify(error=str(error)), 400
     try:
         get_db().execute(
-            "UPDATE voices SET id = ?, name = ?, description = ?, language = ? WHERE id = ?",
+            "UPDATE voices SET id = ?, name = ?, description = ? WHERE id = ?",
             (*values, voice_id),
         )
         get_db().execute(

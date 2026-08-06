@@ -79,8 +79,7 @@ function voiceEditorMarkup(voice = null) {
     <div class="admin-editor-scroll scroll-container">
       <div class="voice-admin-fields"><div class="field"><label>音色名称</label><input class="text-input" name="name" maxlength="40" required value="${esc(voice?.name || "")}" placeholder="例如：沉稳男声"></div>
       <div class="field"><label>speaker_id</label><input class="text-input mono-input" name="id" maxlength="120" required value="${esc(voice?.id || "")}" placeholder="输入 speaker_id"></div>
-      <div class="field"><label>音色描述</label><input class="text-input" name="description" maxlength="120" value="${esc(voice?.description || "")}" placeholder="例如：低沉、克制、适合叙事"></div>
-      <div class="field"><label>回复语言</label><select class="select-input" name="language"><option value="zh" ${voice?.language !== "en" ? "selected" : ""}>中文</option><option value="en" ${voice?.language === "en" ? "selected" : ""}>英文</option></select></div></div>
+      <div class="field"><label>音色描述</label><input class="text-input" name="description" maxlength="120" value="${esc(voice?.description || "")}" placeholder="例如：低沉、克制、适合叙事"></div></div>
     </div>
     <footer class="dialog-actions admin-editor-actions"><button class="primary-button" type="submit">${voice ? "保存修改" : "添加音色"}</button></footer>
   </form>`;
