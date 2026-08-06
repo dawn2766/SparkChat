@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.avatar_storage import store_avatar_snapshot
+from backend.avatar_storage import MAX_AVATAR_BYTES, store_avatar_snapshot
 
 
 class AvatarStorageTest(unittest.TestCase):
@@ -27,6 +27,17 @@ class AvatarStorageTest(unittest.TestCase):
                     "data:image/webp;base64,not-valid!",
                     temporary_directory,
                 )
+
+    def test_snapshot_rejects_oversized_image_before_writing(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            data_url = "data:image/png;base64," + base64.b64encode(
+                b"x" * (MAX_AVATAR_BYTES + 1)
+            ).decode("ascii")
+
+            with self.assertRaisesRegex(ValueError, "头像文件过大"):
+                store_avatar_snapshot(data_url, temporary_directory)
+
+            self.assertEqual(list(Path(temporary_directory).iterdir()), [])
 
 
 if __name__ == "__main__":

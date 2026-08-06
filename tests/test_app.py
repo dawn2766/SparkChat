@@ -28,6 +28,10 @@ class SparkChatApiTest(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         os.environ["DATABASE_PATH"] = str(Path(cls.temp_dir.name) / "sparkchat.db")
         os.environ["FLASK_SECRET_KEY"] = "test-secret-key"
+        cls.admin_username = f"admin_{uuid.uuid4().hex[:10]}"
+        cls.admin_password = uuid.uuid4().hex
+        os.environ["INITIAL_ADMIN_USERNAME"] = cls.admin_username
+        os.environ["INITIAL_ADMIN_PASSWORD"] = cls.admin_password
         from backend.app import DATABASE_PATH, app, get_db
 
         cls.app = app
@@ -44,7 +48,10 @@ class SparkChatApiTest(unittest.TestCase):
         client = cls.app.test_client()
         cls.assertEqual(
             unittest.TestCase(),
-            client.post("/api/auth/login", json={"username": "Admin", "password": "123"}).status_code,
+            client.post(
+                "/api/auth/login",
+                json={"username": cls.admin_username, "password": cls.admin_password},
+            ).status_code,
             200,
         )
         cls.assertEqual(
@@ -151,7 +158,7 @@ class SparkChatApiTest(unittest.TestCase):
 
     def test_admin_account_and_user_management(self):
         self.assertEqual(self.client.get("/api/admin/users").status_code, 401)
-        self.login("Admin", "123")
+        self.login(self.admin_username, self.admin_password)
         me = self.client.get("/api/auth/me")
         self.assertTrue(me.json["user"]["isAdmin"])
         created = self.client.post(
@@ -168,7 +175,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.login("managed-user", "efgh")
         self.assertEqual(self.client.get("/api/admin/users").status_code, 403)
         self.client.post("/api/auth/logout")
-        self.login("Admin", "123")
+        self.login(self.admin_username, self.admin_password)
         self.assertEqual(self.client.delete(f"/api/admin/users/{user_id}").status_code, 200)
         self.assertEqual(self.client.delete("/api/admin/users/2").status_code, 409)
 
@@ -286,7 +293,7 @@ class SparkChatApiTest(unittest.TestCase):
     def test_admin_preset_character_updates_override_for_all_users(self):
         from backend.app import get_db
 
-        self.login("Admin", "123")
+        self.login(self.admin_username, self.admin_password)
         created = self.client.post(
             "/api/admin/characters",
             json={
@@ -331,7 +338,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(second_override.status_code, 200)
 
         self.client.post("/api/auth/logout")
-        self.login("Admin", "123")
+        self.login(self.admin_username, self.admin_password)
         updated = self.client.patch(
             f"/api/admin/characters/{character_id}",
             json={
@@ -359,7 +366,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertEqual(other_synced["persona"], "管理员最新设定")
 
         self.client.post("/api/auth/logout")
-        self.login("Admin", "123")
+        self.login(self.admin_username, self.admin_password)
         self.assertEqual(self.client.delete(f"/api/admin/characters/{character_id}").status_code, 200)
 
     def test_stage_directions_are_preserved_as_speech_cues(self):
@@ -453,7 +460,7 @@ class SparkChatApiTest(unittest.TestCase):
 
         original_voice_id = "S_admin_test_voice"
         updated_voice_id = "S_admin_test_voice_updated"
-        self.login("Admin", "123")
+        self.login(self.admin_username, self.admin_password)
         try:
             created = self.client.post(
                 "/api/admin/voices",
@@ -1258,8 +1265,23 @@ class SparkChatApiTest(unittest.TestCase):
 
         with self.app.app_context():
             database = token_server.get_db()
+            target_conversation = database.execute(
+                "INSERT INTO conversations (user_id, character_id) VALUES (1, 1)"
+            ).lastrowid
+            other_conversation = database.execute(
+                "INSERT INTO conversations (user_id, character_id) VALUES (1, 1)"
+            ).lastrowid
             database.execute(
-                "INSERT INTO messages (user_id, character_id, role, content) VALUES (1, 1, 'assistant', '这是一条回复。')"
+                "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (1, 1, ?, 'user', '目标对话问题')",
+                (target_conversation,),
+            )
+            database.execute(
+                "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (1, 1, ?, 'assistant', '其他对话内容不得进入翻译上下文')",
+                (other_conversation,),
+            )
+            database.execute(
+                "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (1, 1, ?, 'assistant', '这是一条回复。')",
+                (target_conversation,),
             )
             message_id = database.execute("SELECT last_insert_rowid()").fetchone()[0]
             database.commit()
@@ -1293,6 +1315,9 @@ class SparkChatApiTest(unittest.TestCase):
             self.assertEqual(calls[0]["model"], TRANSLATION_MODEL)
             self.assertTrue(calls[0]["stream"])
             self.assertIn("只输出目标回复的完整译文", calls[0]["instructions"])
+            translation_input = calls[0]["input"][0]["content"]
+            self.assertIn("目标对话问题", translation_input)
+            self.assertNotIn("其他对话内容不得进入翻译上下文", translation_input)
         finally:
             token_server.ark.responses = original_responses
 

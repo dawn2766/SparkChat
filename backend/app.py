@@ -447,11 +447,24 @@ def init_db():
         "INSERT OR IGNORE INTO users (username, password_hash, chat_model) VALUES (?, ?, ?)",
         ("CaraLin", generate_password_hash("2766"), DEFAULT_CHAT_MODEL),
     )
-    database.execute(
-        "INSERT OR IGNORE INTO users (username, password_hash, is_admin, chat_model) VALUES (?, ?, 1, ?)",
-        ("Admin", generate_password_hash("123"), DEFAULT_CHAT_MODEL),
-    )
-    database.execute("UPDATE users SET is_admin = 1 WHERE username = ? COLLATE NOCASE", ("Admin",))
+    admin_username = os.getenv("INITIAL_ADMIN_USERNAME", "").strip()
+    admin_password = os.getenv("INITIAL_ADMIN_PASSWORD", "")
+    admin_exists = database.execute(
+        "SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1"
+    ).fetchone()
+    if not admin_exists and admin_username and 4 <= len(admin_password) <= 128:
+        if not 3 <= len(admin_username) <= 24:
+            raise RuntimeError("INITIAL_ADMIN_USERNAME length must be 3 to 24 characters")
+        existing_user = database.execute(
+            "SELECT is_admin FROM users WHERE username = ? COLLATE NOCASE",
+            (admin_username,),
+        ).fetchone()
+        if existing_user is not None:
+            raise RuntimeError("INITIAL_ADMIN_USERNAME is already in use")
+        database.execute(
+            "INSERT INTO users (username, password_hash, is_admin, chat_model) VALUES (?, ?, 1, ?)",
+            (admin_username, generate_password_hash(admin_password), DEFAULT_CHAT_MODEL),
+        )
     database.commit()
 
 
@@ -1431,7 +1444,7 @@ def list_messages(character_id, conversation_id):
 def get_assistant_message(character_id, message_id):
     return get_db().execute(
         """
-        SELECT id, content FROM messages
+        SELECT id, conversation_id, content FROM messages
         WHERE id = ? AND user_id = ? AND character_id = ? AND role = 'assistant'
         """,
         (message_id, session["user_id"], character_id),
@@ -1922,10 +1935,10 @@ def translate_message(character_id, message_id):
     context = get_db().execute(
         """
         SELECT role, content FROM messages
-        WHERE user_id = ? AND character_id = ? AND id <= ?
+        WHERE conversation_id = ? AND id <= ?
         ORDER BY id DESC LIMIT 8
         """,
-        (session["user_id"], character_id, message_id),
+        (message["conversation_id"], message_id),
     ).fetchall()[::-1]
 
     @stream_with_context
