@@ -1,4 +1,4 @@
-const CACHE_NAME = "sparkchat-shell-v71";
+const CACHE_NAME = "sparkchat-shell-v82";
 const APP_SHELL = [
   "./",
   "./index.html",

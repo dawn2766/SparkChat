@@ -73,6 +73,7 @@ async function openMenu(select, wrapper, button) {
 
   const menu = document.createElement("div");
   menu.className = "select-menu";
+  if (select.dataset.menuClass) menu.classList.add(select.dataset.menuClass);
   menu.id = `${select.id || wrapper.dataset.selectId}-menu`;
   menu.setAttribute("role", "listbox");
 

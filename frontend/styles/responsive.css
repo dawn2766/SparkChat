@@ -24,20 +24,15 @@
   }
 
   .contact {
+    --contact-divider-inset: 79px;
     padding-left: 16px;
     padding-right: 16px;
   }
 
-  .profile-setting {
-    align-items: center;
-    flex-direction: row;
-    gap: 10px;
-  }
-
   .profile-setting .select-control {
-    width: min(58%, 220px);
-    max-width: 220px;
-    flex: 0 1 220px;
+    width: min(48%, 190px);
+    max-width: 190px;
+    flex: 0 1 190px;
   }
 
   .auth-view {
@@ -173,15 +168,15 @@
   }
 
   .bottom-nav {
-    height: calc(66px + env(safe-area-inset-bottom));
+    height: calc(58px + env(safe-area-inset-bottom));
   }
 
   .view {
-    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
   }
 
   .view:has(.main-page-body) {
-    padding-bottom: calc(66px + env(safe-area-inset-bottom));
+    padding-bottom: calc(58px + env(safe-area-inset-bottom));
   }
 
   .chat-view {
@@ -230,9 +225,18 @@
 }
 
 @media (max-width: 580px) {
-  #create-form .section {
-    padding-top: 12px;
-    padding-bottom: 12px;
+  #create-form > .section {
+    padding-top: 14px;
+    padding-bottom: 14px;
+    border-top: 0;
+  }
+
+  #create-form > .section:first-child {
+    padding-top: 22px;
+  }
+
+  #create-form > .form-actions {
+    border-top: 0;
   }
 }
 

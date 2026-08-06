@@ -17,21 +17,21 @@
 
 .view {
   min-height: 100vh;
-  padding-bottom: 86px;
+  padding-bottom: 80px;
 }
 
 .bottom-nav {
   width: min(100%, 580px);
-  height: 64px;
+  height: calc(58px + env(safe-area-inset-bottom));
   position: fixed;
   z-index: 8;
   bottom: 0;
   left: 50%;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  padding: 6px 12px max(6px, env(safe-area-inset-bottom));
+  padding: 4px 12px calc(4px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  border-top: 1px solid var(--line);
+  border-top: .5px solid var(--line);
   background: rgb(15 19 19 / 96%);
   backdrop-filter: blur(18px);
 }
@@ -65,7 +65,7 @@
   justify-content: center;
   min-height: calc(48px + env(safe-area-inset-top));
   padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
-  border-bottom: 1px solid var(--line);
+  border-bottom: .5px solid var(--line);
 }
 
 .page-heading h1 {
@@ -86,7 +86,7 @@
 
 .section {
   padding: 24px 22px;
-  border-top: 1px solid var(--line);
+  border-top: .5px solid var(--line);
 }
 
 .field-grid {
@@ -272,7 +272,6 @@
   scrollbar-width: thin;
 }
 
-.text-area:hover,
 .text-area:focus {
   scrollbar-color: rgb(141 152 147 / 58%) transparent;
 }
@@ -290,7 +289,6 @@
   border-radius: 999px;
 }
 
-.text-area:hover::-webkit-scrollbar-thumb,
 .text-area:focus::-webkit-scrollbar-thumb {
   background: rgb(141 152 147 / 58%);
 }
@@ -298,15 +296,6 @@
 .text-input::placeholder,
 .text-area::placeholder {
   color: #65706b;
-}
-
-.text-input:hover,
-.text-area:hover {
-  border-color: var(--line-strong);
-}
-
-.select-trigger:hover:not(:disabled) {
-  border-color: var(--line-strong);
 }
 
 .text-input:focus,
@@ -407,29 +396,27 @@
   font-weight: 700;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .icon-button:hover {
-    color: var(--ink);
-    border-color: var(--line);
-    background: var(--surface);
+@media (hover: none) and (pointer: coarse) {
+  .icon-button:active,
+  .nav-item:active,
+  .select-trigger:active:not(:disabled),
+  .select-option:active:not(:disabled) {
+    background: var(--surface-soft);
   }
 
-  .nav-item:hover {
-    color: var(--ink);
-    background: var(--surface-raised);
-  }
-
-  .primary-button:hover:not(:disabled) {
+  .nav-item.active:active {
     background: var(--accent-strong);
   }
 
-  .secondary-button:hover:not(:disabled) {
-    border-color: var(--muted);
+  .primary-button:active:not(:disabled) {
+    background: var(--accent-strong);
+  }
+
+  .secondary-button:active:not(:disabled) {
     background: #293130;
   }
 
-  .danger-button:hover:not(:disabled) {
-    border-color: var(--danger);
+  .danger-button:active:not(:disabled) {
     background: rgb(255 129 121 / 10%);
   }
 }
