@@ -53,8 +53,6 @@ async function boot() {
     await loadHome();
   } catch (error) {
     renderAuth(error.message, loadHome);
-  } finally {
-    requestAnimationFrame(() => document.body.classList.add("app-ready"));
   }
 }
 
