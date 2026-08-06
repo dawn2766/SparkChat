@@ -87,7 +87,7 @@
   gap: 9px;
   padding: 0 12px;
   color: var(--muted);
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius);
   background: var(--surface-raised);
   cursor: text;
@@ -96,7 +96,8 @@
 
 .search-box:focus-within,
 .search-box.focused {
-  box-shadow: 0 0 0 2px rgb(216 243 93 / 10%);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(216 243 93 / 8%);
 }
 
 .search-box:focus-within svg,
