@@ -217,7 +217,7 @@
   box-shadow: 0 12px 32px rgb(0 0 0 / 34%);
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
-  animation: select-open .12s ease-out;
+  animation: select-open .08s ease-out;
 }
 
 .select-menu[hidden] {
