@@ -24,7 +24,11 @@ function bindChatViewport() {
   let frame = 0;
   const syncHeight = () => {
     const height = viewport?.height || window.innerHeight;
+    const offsetTop = viewport?.offsetTop || 0;
+    const keyboardOpen = window.innerHeight - height > 150;
     document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
+    document.documentElement.style.setProperty("--chat-viewport-offset", `${offsetTop}px`);
+    document.querySelector(".chat-view")?.classList.toggle("keyboard-open", keyboardOpen);
   };
   const trackHeight = (remainingFrames = 24) => {
     cancelAnimationFrame(frame);

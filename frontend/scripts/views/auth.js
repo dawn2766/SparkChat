@@ -56,6 +56,7 @@ export function renderAuth(error = "", onAuthenticated) {
     });
   });
 
+  passwordToggle.addEventListener("pointerdown", (event) => event.preventDefault());
   passwordToggle.onclick = (event) => {
     const showPassword = fields.password.type === "password";
     fields.password.type = showPassword ? "text" : "password";
@@ -63,7 +64,6 @@ export function renderAuth(error = "", onAuthenticated) {
     event.currentTarget.setAttribute("aria-pressed", String(showPassword));
     event.currentTarget.innerHTML = `<i data-lucide="${showPassword ? "eye-off" : "eye"}" aria-hidden="true"></i>`;
     createIcons({ icons: { Eye, EyeOff } });
-    fields.password.focus({ preventScroll: true });
   };
 
   document.querySelector("#auth-switch").onclick = () => {
