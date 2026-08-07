@@ -168,7 +168,7 @@
   }
 
   .bottom-nav {
-    height: calc(58px + env(safe-area-inset-bottom));
+    height: calc(61px + env(safe-area-inset-bottom));
   }
 
   .view {
@@ -176,7 +176,7 @@
   }
 
   .view:has(.main-page-body) {
-    padding-bottom: calc(58px + env(safe-area-inset-bottom));
+    padding-bottom: calc(61px + env(safe-area-inset-bottom));
   }
 
   .chat-view {
@@ -202,20 +202,20 @@
 
   .message-action,
   .speak-button {
-    width: 30px;
-    height: 28px;
+    width: 32px;
+    height: 30px;
   }
 
   .composer {
-    grid-template-columns: 46px minmax(0, 1fr) 46px;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
   }
 
   .composer.send-hidden {
-    grid-template-columns: 46px minmax(0, 1fr) 0;
+    grid-template-columns: 44px minmax(0, 1fr) 0;
   }
 
   .composer.editing-message {
-    grid-template-columns: minmax(0, 1fr) 46px;
+    grid-template-columns: minmax(0, 1fr) 44px;
   }
 
   .composer.editing-message.send-hidden {
