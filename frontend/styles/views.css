@@ -1,11 +1,29 @@
 .auth-view {
+  position: relative;
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: clamp(32px, 7vh, 72px) 20px;
+  padding: clamp(32px, 7vh, 72px) 20px max(56px, calc(24px + env(safe-area-inset-bottom)));
   background:
     radial-gradient(circle at 50% 30%, rgb(216 243 93 / 7%), transparent 24rem),
     var(--bg);
+}
+
+.auth-footer {
+  position: absolute;
+  right: 20px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 20px;
+  text-align: center;
+}
+
+.auth-footer a {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-footer a:hover {
+  color: var(--ink);
 }
 
 .auth-brand {
