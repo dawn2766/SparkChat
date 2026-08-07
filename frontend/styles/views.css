@@ -378,6 +378,8 @@
 }
 
 .avatar-choose {
+  width: 84px;
+  min-width: 84px;
   min-height: 38px;
   padding-inline: 12px;
   cursor: pointer;
@@ -966,6 +968,13 @@
   min-width: 112px;
   min-height: 46px;
   padding-inline: 16px;
+}
+
+.admin-manager-dialog .avatar-choose {
+  width: 84px;
+  min-width: 84px;
+  min-height: 38px;
+  padding-inline: 12px;
 }
 
 .user-manager-dialog {
