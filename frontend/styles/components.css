@@ -1,18 +1,24 @@
 .icon-button {
   width: 40px;
   height: 40px;
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius);
   font-size: 20px;
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.icon-button svg {
+.icon-button > svg {
   width: 18px;
   height: 18px;
+  margin: auto;
 }
 
 .view {
