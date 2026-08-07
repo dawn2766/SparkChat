@@ -12,7 +12,10 @@
   --accent-strong: #e3fa72;
   --accent-ink: #10150f;
   --warning: #ff9278;
+  --warning-border: rgb(255 146 120 / 24%);
+  --warning-surface: rgb(255 146 120 / 7%);
   --danger: #ff8179;
+  --danger-border: rgb(240 104 98 / 40%);
   --success: #86dfab;
   --shadow: 0 24px 80px rgb(0 0 0 / 42%);
   --radius: 8px;
@@ -61,10 +64,7 @@ body {
   touch-action: manipulation;
   overscroll-behavior-x: none;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 12% 0%, rgb(216 243 93 / 6%), transparent 28rem),
-    radial-gradient(circle at 100% 100%, rgb(255 146 120 / 4%), transparent 24rem),
-    var(--bg);
+  background: var(--bg);
 }
 
 body:has(.app-dialog[open]) {

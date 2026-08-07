@@ -315,6 +315,11 @@
   outline: none;
 }
 
+.text-input[aria-invalid="true"],
+.text-area[aria-invalid="true"] {
+  border-color: var(--danger-border);
+}
+
 .primary-button,
 .secondary-button,
 .danger-button {
@@ -347,7 +352,7 @@
 
 .danger-button {
   color: var(--danger);
-  border: 1px solid rgb(240 104 98 / 40%);
+  border: 1px solid var(--danger-border);
   background: transparent;
 }
 
@@ -416,6 +421,12 @@
 
   .primary-button:active:not(:disabled) {
     background: var(--accent-strong);
+  }
+
+  .auth-switch:active:not(:disabled),
+  .password-toggle:active:not(:disabled) {
+    color: var(--ink);
+    background: var(--surface-soft);
   }
 
   .secondary-button:active:not(:disabled) {

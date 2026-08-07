@@ -4,9 +4,7 @@
   display: grid;
   place-items: center;
   padding: clamp(32px, 7vh, 72px) 20px max(56px, calc(24px + env(safe-area-inset-bottom)));
-  background:
-    radial-gradient(circle at 50% 20%, rgb(216 243 93 / 9%), transparent 22rem),
-    var(--bg);
+  background: var(--bg);
 }
 
 .auth-footer {
@@ -20,10 +18,6 @@
 .auth-footer a {
   color: var(--muted);
   font-size: 12px;
-}
-
-.auth-footer a:hover {
-  color: var(--ink);
 }
 
 .auth-brand {
@@ -66,36 +60,10 @@
   font-size: 13px;
 }
 
-.auth-form {
-  width: 100%;
-}
-
-.auth-field {
-  gap: 7px;
-  margin-bottom: 15px;
-}
-
-.auth-field label {
+.auth-form .field > label {
   color: var(--ink);
   font-size: 12px;
   font-weight: 700;
-}
-
-.auth-field .text-input {
-  width: 100%;
-  border-color: var(--line-strong);
-  background: rgb(29 35 33 / 74%);
-  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
-}
-
-.auth-field .text-input:focus {
-  border-color: var(--accent);
-  background: var(--surface-raised);
-  box-shadow: 0 0 0 3px rgb(216 243 93 / 10%);
-}
-
-.auth-field.has-error .text-input {
-  border-color: var(--warning);
 }
 
 .field-error {
@@ -110,34 +78,28 @@
   position: relative;
 }
 
-.password-control .text-input {
-  padding-right: 58px;
+.password-control.has-value .text-input {
+  padding-right: 48px;
 }
 
 .password-toggle {
   position: absolute;
   top: 50%;
   right: 6px;
-  min-width: 44px;
+  width: 36px;
   height: 36px;
   transform: translateY(-50%);
   color: var(--muted);
   background: transparent;
-  font-size: 12px;
-  font-weight: 700;
+  border-radius: 6px;
 }
 
-.password-toggle:hover {
-  color: var(--ink);
-}
-
-.password-toggle-hide,
-.password-toggle[aria-pressed="true"] .password-toggle-show {
-  display: none;
-}
-
-.password-toggle[aria-pressed="true"] .password-toggle-hide {
-  display: inline;
+.password-toggle svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  margin: auto;
+  stroke-width: 1.8;
 }
 
 .auth-message {
@@ -146,9 +108,9 @@
   padding: 0 12px;
   overflow: hidden;
   color: var(--warning);
-  border: 0 solid rgb(255 146 120 / 24%);
+  border: 0 solid var(--warning-border);
   border-radius: var(--radius);
-  background: rgb(255 146 120 / 7%);
+  background: var(--warning-surface);
   font-size: 12px;
   line-height: 18px;
   opacity: 0;
@@ -167,18 +129,6 @@
   margin-top: 3px;
 }
 
-.auth-submit-loading {
-  display: none;
-}
-
-.is-submitting .auth-submit-label {
-  display: none;
-}
-
-.is-submitting .auth-submit-loading {
-  display: inline;
-}
-
 .auth-divider {
   display: flex;
   align-items: center;
@@ -190,15 +140,17 @@
 
 .auth-divider::before,
 .auth-divider::after {
-  height: 1px;
+  height: .5px;
   flex: 1;
   background: var(--line);
   content: "";
 }
 
 .auth-switch {
-  width: 100%;
+  width: fit-content;
+  display: block;
   min-height: 40px;
+  margin: 0 auto;
   padding: 8px;
   color: var(--muted);
   background: transparent;
@@ -207,10 +159,6 @@
 
 .auth-switch strong {
   color: var(--accent);
-}
-
-.auth-switch:hover strong {
-  color: var(--accent-strong);
 }
 
 .search-toolbar {
@@ -237,7 +185,6 @@
 .search-box:focus-within,
 .search-box.focused {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgb(216 243 93 / 8%);
 }
 
 .search-box:focus-within svg,
@@ -1128,9 +1075,7 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at 100% 0%, rgb(216 243 93 / 5%), transparent 20rem),
-    var(--bg);
+  background: var(--bg);
 }
 
 .chat-header {
@@ -1366,7 +1311,6 @@
 
 .composer.editing-message textarea.text-area:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgb(216 243 93 / 8%);
 }
 
 .composer.editing-message.is-updating textarea {

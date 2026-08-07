@@ -1,3 +1,4 @@
+import { createIcons, Eye, EyeOff } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api } from "../api.js";
 import { app, esc } from "../dom.js";
 import { state } from "../state.js";
@@ -21,11 +22,15 @@ export function validateAuthForm(username, password, isLogin) {
 
 export function renderAuth(error = "", onAuthenticated) {
   const isLogin = state.authMode === "login";
-  app.innerHTML = `<main class="auth-view"><section class="auth-content"><header class="auth-brand"><img src="assets/images/sparkchat-logo.png" alt=""><span>SPARKCHAT</span></header><div class="auth-heading"><h1>${isLogin ? "欢迎回来" : "创建你的账号"}</h1><p>${isLogin ? "登录以继续你的对话" : "一个账号，保存你的角色与对话"}</p></div><form class="auth-form" id="auth-form" novalidate><div class="field auth-field"><label for="username">账号</label><input class="text-input" id="username" name="username" required minlength="${isLogin ? 1 : AUTH_RULES.username.min}" maxlength="${AUTH_RULES.username.max}" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="${isLogin ? "输入你的账号" : "3–24 个字符"}" aria-describedby="username-error"><p class="field-error" id="username-error"></p></div><div class="field auth-field"><label for="password">密码</label><div class="password-control"><input class="text-input" id="password" name="password" type="password" required minlength="${isLogin ? 1 : AUTH_RULES.password.min}" maxlength="${AUTH_RULES.password.max}" autocomplete="${isLogin ? "current-password" : "new-password"}" placeholder="${isLogin ? "输入你的密码" : "至少 4 个字符"}" aria-describedby="password-error"><button class="password-toggle" id="password-toggle" type="button" aria-label="显示密码" aria-pressed="false"><span class="password-toggle-show">显示</span><span class="password-toggle-hide">隐藏</span></button></div><p class="field-error" id="password-error"></p></div><div class="auth-message${error ? " is-visible" : ""}" id="auth-message" role="alert" aria-live="polite">${esc(error)}</div><button class="primary-button full-width auth-submit" id="auth-submit"><span class="auth-submit-label">${isLogin ? "登录" : "创建账号"}</span><span class="auth-submit-loading">${isLogin ? "正在登录…" : "正在创建…"}</span></button><div class="auth-divider"><span>或</span></div><button class="auth-switch" id="auth-switch" type="button">${isLogin ? "还没有账号？" : "已有账号？"} <strong>${isLogin ? "创建账号" : "直接登录"}</strong></button></form></section><footer class="auth-footer"><a href="http://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">闽ICP备2024055854号</a></footer></main>`;
+  const submitLabel = isLogin ? "登录" : "创建账号";
+  const submittingLabel = isLogin ? "正在登录…" : "正在创建…";
+  app.innerHTML = `<main class="auth-view"><section class="auth-content"><header class="auth-brand"><img src="assets/images/sparkchat-logo.png" alt=""><span>SPARKCHAT</span></header><div class="auth-heading"><h1>${isLogin ? "欢迎回来" : "创建你的账号"}</h1><p>${isLogin ? "登录以继续你的对话" : "一个账号，保存你的角色与对话"}</p></div><form class="auth-form" id="auth-form" novalidate><div class="field"><label for="username">账号</label><input class="text-input" id="username" name="username" required minlength="${isLogin ? 1 : AUTH_RULES.username.min}" maxlength="${AUTH_RULES.username.max}" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="${isLogin ? "输入你的账号" : "3–24 个字符"}" aria-describedby="username-error"><p class="field-error" id="username-error"></p></div><div class="field"><label for="password">密码</label><div class="password-control"><input class="text-input" id="password" name="password" type="password" required minlength="${isLogin ? 1 : AUTH_RULES.password.min}" maxlength="${AUTH_RULES.password.max}" autocomplete="${isLogin ? "current-password" : "new-password"}" placeholder="${isLogin ? "输入你的密码" : "至少 4 个字符"}" aria-describedby="password-error"><button class="password-toggle" id="password-toggle" type="button" aria-label="显示密码" aria-pressed="false" hidden><i data-lucide="eye" aria-hidden="true"></i></button></div><p class="field-error" id="password-error"></p></div><div class="auth-message${error ? " is-visible" : ""}" id="auth-message" role="alert" aria-live="polite">${esc(error)}</div><button class="primary-button full-width auth-submit" id="auth-submit">${submitLabel}</button><div class="auth-divider"><span>或</span></div><button class="auth-switch" id="auth-switch" type="button">${isLogin ? "还没有账号？" : "已有账号？"} <strong>${isLogin ? "创建账号" : "直接登录"}</strong></button></form></section><footer class="auth-footer"><a href="http://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">闽ICP备2024055854号</a></footer></main>`;
 
   const formElement = document.querySelector("#auth-form");
   const submitButton = document.querySelector("#auth-submit");
   const messageElement = document.querySelector("#auth-message");
+  const passwordControl = document.querySelector(".password-control");
+  const passwordToggle = document.querySelector("#password-toggle");
   const fields = {
     username: document.querySelector("#username"),
     password: document.querySelector("#password"),
@@ -35,7 +40,6 @@ export function renderAuth(error = "", onAuthenticated) {
     const input = fields[name];
     const errorElement = document.querySelector(`#${name}-error`);
     input.setAttribute("aria-invalid", String(Boolean(message)));
-    input.closest(".auth-field").classList.toggle("has-error", Boolean(message));
     errorElement.textContent = message;
   };
 
@@ -44,18 +48,36 @@ export function renderAuth(error = "", onAuthenticated) {
     messageElement.classList.toggle("is-visible", Boolean(message));
   };
 
+  const updatePasswordToggle = () => {
+    const hasPassword = Boolean(fields.password.value);
+    passwordToggle.hidden = !hasPassword;
+    passwordControl.classList.toggle("has-value", hasPassword);
+    if (!hasPassword && fields.password.type === "text") {
+      fields.password.type = "password";
+      passwordToggle.setAttribute("aria-label", "显示密码");
+      passwordToggle.setAttribute("aria-pressed", "false");
+      passwordToggle.innerHTML = '<i data-lucide="eye" aria-hidden="true"></i>';
+      createIcons({ icons: { Eye, EyeOff } });
+    }
+  };
+
+  createIcons({ icons: { Eye, EyeOff } });
+
   Object.entries(fields).forEach(([name, input]) => {
     input.addEventListener("input", () => {
       setFieldError(name);
       setFormMessage();
+      if (name === "password") updatePasswordToggle();
     });
   });
 
-  document.querySelector("#password-toggle").onclick = (event) => {
+  passwordToggle.onclick = (event) => {
     const showPassword = fields.password.type === "password";
     fields.password.type = showPassword ? "text" : "password";
     event.currentTarget.setAttribute("aria-label", showPassword ? "隐藏密码" : "显示密码");
     event.currentTarget.setAttribute("aria-pressed", String(showPassword));
+    event.currentTarget.innerHTML = `<i data-lucide="${showPassword ? "eye-off" : "eye"}" aria-hidden="true"></i>`;
+    createIcons({ icons: { Eye, EyeOff } });
     fields.password.focus({ preventScroll: true });
   };
 
@@ -76,7 +98,7 @@ export function renderAuth(error = "", onAuthenticated) {
     }
 
     submitButton.disabled = true;
-    formElement.classList.add("is-submitting");
+    submitButton.textContent = submittingLabel;
     setFormMessage();
     try {
       const result = await api(`/api/auth/${state.authMode}`, {
@@ -90,7 +112,7 @@ export function renderAuth(error = "", onAuthenticated) {
       fields[submitError.message === "该账号已存在" ? "username" : "password"].focus();
     } finally {
       submitButton.disabled = false;
-      formElement.classList.remove("is-submitting");
+      submitButton.textContent = submitLabel;
     }
   };
 }
