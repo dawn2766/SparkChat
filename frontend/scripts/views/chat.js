@@ -14,6 +14,40 @@ let speechButton = null;
 let dictationGeneration = 0;
 let pendingDictationConversation = null;
 let composerDraftBeforeEdit = "";
+let viewportSyncController = null;
+
+function bindChatViewport() {
+  viewportSyncController?.abort();
+  viewportSyncController = new AbortController();
+  const { signal } = viewportSyncController;
+  const viewport = window.visualViewport;
+  let frame = 0;
+  const syncHeight = () => {
+    const height = viewport?.height || window.innerHeight;
+    document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
+  };
+  const trackHeight = (remainingFrames = 24) => {
+    cancelAnimationFrame(frame);
+    const update = () => {
+      syncHeight();
+      if (remainingFrames-- > 0) frame = requestAnimationFrame(update);
+    };
+    update();
+  };
+  const syncAfterKeyboard = () => {
+    trackHeight(30);
+    window.setTimeout(() => trackHeight(12), 240);
+  };
+
+  syncHeight();
+  window.addEventListener("resize", syncHeight, { signal, passive: true });
+  viewport?.addEventListener("resize", syncHeight, { signal, passive: true });
+  viewport?.addEventListener("scroll", syncHeight, { signal, passive: true });
+  const composer = document.querySelector("#composer textarea");
+  composer?.addEventListener("focus", () => trackHeight(), { signal });
+  composer?.addEventListener("blur", syncAfterKeyboard, { signal });
+  signal.addEventListener("abort", () => cancelAnimationFrame(frame), { once: true });
+}
 
 function selectConversation(conversation) {
   if (!conversation || !state.active) return;
@@ -1040,7 +1074,9 @@ export function renderChat({ onBack }) {
   const latestUserIndex = state.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
   const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex, index === latestUserIndex)).join("");
   app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages scroll-container" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
+  bindChatViewport();
   document.querySelector("#back").onclick = async () => {
+    viewportSyncController?.abort();
     await stopVoiceInteraction();
     onBack();
   };

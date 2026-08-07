@@ -168,7 +168,7 @@
   }
 
   .bottom-nav {
-    height: calc(61px + env(safe-area-inset-bottom));
+    height: calc(59px + env(safe-area-inset-bottom));
   }
 
   .view {
@@ -176,11 +176,11 @@
   }
 
   .view:has(.main-page-body) {
-    padding-bottom: calc(61px + env(safe-area-inset-bottom));
+    padding-bottom: calc(59px + env(safe-area-inset-bottom));
   }
 
   .chat-view {
-    height: 100dvh;
+    height: var(--chat-viewport-height, 100dvh);
   }
 
   .chat-header {

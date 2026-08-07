@@ -28,7 +28,7 @@
 
 .bottom-nav {
   width: min(100%, 580px);
-  height: calc(61px + env(safe-area-inset-bottom));
+  height: calc(59px + env(safe-area-inset-bottom));
   position: fixed;
   z-index: 8;
   bottom: 0;

@@ -733,11 +733,11 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: calc(148px + env(safe-area-inset-top));
+  min-height: calc(124px + env(safe-area-inset-top));
   display: flex;
   align-items: center;
-  gap: 22px;
-  padding: calc(28px + env(safe-area-inset-top)) 24px 28px;
+  gap: 16px;
+  padding: calc(20px + env(safe-area-inset-top)) 20px 20px;
   border: 0;
   border-bottom: .5px solid var(--line);
   background: var(--surface);
@@ -749,17 +749,17 @@
 }
 
 .profile-card .avatar {
-  width: 64px;
-  height: 64px;
-  flex-basis: 64px;
-  font-size: 20px;
+  width: 52px;
+  height: 52px;
+  flex-basis: 52px;
+  font-size: 16px;
 }
 
 .profile-label {
   display: block;
-  margin-top: 5px;
+  margin-top: 3px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
@@ -1061,8 +1061,8 @@
 
 .profile-card h2 {
   margin: 0;
-  font-size: 26px;
-  line-height: 1.15;
+  font-size: 22px;
+  line-height: 1.2;
 }
 
 .profile-card p {
@@ -1072,14 +1072,14 @@
 }
 
 .chat-view {
-  height: 100vh;
+  height: var(--chat-viewport-height, 100dvh);
   display: flex;
   flex-direction: column;
   background: var(--bg);
 }
 
 .chat-header {
-  min-height: 76px;
+  min-height: calc(60px + env(safe-area-inset-top));
   display: flex;
   align-items: center;
   gap: 11px;
@@ -1247,7 +1247,7 @@
   grid-template-columns: 50px minmax(0, 1fr) 50px;
   align-items: center;
   gap: 8px;
-  padding: 8px 13px calc(8px + env(safe-area-inset-bottom));
+  padding: 7px 13px calc(7px + env(safe-area-inset-bottom));
   border-top: .5px solid var(--line);
   background: var(--surface);
   transition: grid-template-columns 180ms ease;
