@@ -107,7 +107,22 @@
   }
 
   .avatar-field {
-    grid-template-columns: 58px minmax(0, 1fr);
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+  }
+
+  .character-fields .avatar-field-preview {
+    width: 52px;
+    height: 52px;
+  }
+
+  .character-fields .avatar-choose {
+    grid-column: 3;
+  }
+
+  .character-fields .avatar-field-copy span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .user-create-form {
@@ -161,10 +176,6 @@
   .admin-editor-scroll,
   .admin-role-editor .admin-editor-scroll {
     padding: 16px;
-  }
-
-  .avatar-choose {
-    grid-column: 1 / -1;
   }
 
   .bottom-nav {
@@ -226,16 +237,12 @@
 
 @media (max-width: 580px) {
   #create-form > .section {
-    padding-top: 14px;
-    padding-bottom: 14px;
+    padding: 16px;
     border-top: 0;
   }
 
-  #create-form > .section:first-child {
-    padding-top: 22px;
-  }
-
   #create-form > .form-actions {
+    padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
     border-top: 0;
   }
 }
@@ -260,8 +267,7 @@
     width: 100%;
   }
 
-  .voice-admin-fields,
-  .role-admin-form .field-grid {
+  .voice-admin-fields {
     grid-template-columns: 1fr;
   }
 }
@@ -271,7 +277,4 @@
     grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr);
   }
 
-  .role-admin-form .field-grid {
-    grid-template-columns: 1fr 1fr;
-  }
 }

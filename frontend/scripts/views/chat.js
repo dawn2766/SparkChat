@@ -600,14 +600,14 @@ function settingsMarkup(character) {
   return `<dialog class="app-dialog character-dialog" id="character-dialog" tabindex="-1">
     <form class="dialog-panel" id="character-form">
       <header class="dialog-header"><div><h2>角色配置</h2></div></header>
-      <div class="dialog-body scroll-container">
+      <div class="dialog-body character-fields scroll-container">
         ${avatarFieldMarkup({ currentUrl: character.avatarUrl, id: "edit-avatar" })}
         <div class="field"><label for="edit-name">角色名称</label><input class="text-input" id="edit-name" name="name" maxlength="40" required value="${esc(character.name)}"></div>
         <div class="field"><label for="edit-persona">身份背景</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
         <div class="field"><label for="edit-language">回答语言</label><select class="select-input" id="edit-language" name="language"><option value="zh" ${character.language === "zh" ? "selected" : ""}>中文</option><option value="en" ${character.language === "en" ? "selected" : ""}>英文</option></select></div>
         <div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>
       </div>
-      <footer class="dialog-actions ${character.isPreset ? "" : "dialog-actions-split"}">${character.isPreset ? "" : '<button type="button" class="danger-button" data-delete-character>删除角色</button>'}<span class="dialog-action-group"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></span></footer>
+      <footer class="dialog-actions character-form-actions ${character.isPreset ? "" : "dialog-actions-split"}">${character.isPreset ? "" : '<button type="button" class="danger-button" data-delete-character>删除角色</button>'}<span class="dialog-action-group"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></span></footer>
     </form>
   </dialog>`;
 }

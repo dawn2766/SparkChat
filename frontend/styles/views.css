@@ -309,20 +309,22 @@
 }
 
 #create-form .avatar-field {
-  margin-bottom: 0;
+  margin-bottom: 16px;
 }
 
 #create-form > .section {
-  padding-block: 14px;
+  padding: 16px;
   border-top: 0;
-}
-
-#create-form > .section:first-child {
-  padding-top: 22px;
 }
 
 #create-form > .form-actions {
+  padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
   border-top: 0;
+}
+
+.dialog-actions.character-form-actions,
+#create-form > .character-form-actions {
+  padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
 }
 
 .view:has(.main-page-body) {
@@ -916,10 +918,6 @@
   align-items: start;
 }
 
-.role-admin-form .field-grid {
-  grid-template-columns: 1fr;
-}
-
 .voice-admin-form .field {
   margin-bottom: 18px;
 }
@@ -937,15 +935,23 @@
 }
 
 .admin-role-editor .admin-editor-scroll {
-  padding: 22px;
-}
-
-.role-persona-input {
-  min-height: 132px;
+  padding: 16px;
 }
 
 .character-prompt {
-  min-height: 132px;
+  min-height: 96px;
+}
+
+.character-fields {
+  padding: 16px;
+}
+
+.character-fields > .field {
+  margin-bottom: 10px;
+}
+
+.character-fields > .avatar-field {
+  margin-bottom: 16px;
 }
 
 .admin-editor-actions {

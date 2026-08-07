@@ -9,8 +9,8 @@ export function avatarFieldMarkup({ currentUrl = "", id = "avatar" } = {}) {
     <input type="hidden" name="avatarUrl" value="${esc(currentUrl)}">
     <input class="avatar-file-input" id="${id}-file" type="file" accept="image/*" hidden>
     <div class="avatar-field-preview" data-avatar-preview>${image}</div>
-    <div class="avatar-field-copy"><strong>角色头像</strong><span>支持常见图片格式，上传前会自动压缩</span></div>
-    <label class="secondary-button avatar-choose" for="${id}-file">${currentUrl ? "更换" : "选择图片"}</label>
+    <div class="avatar-field-copy"><strong>角色头像</strong><span>支持常见图片格式</span></div>
+    <label class="secondary-button avatar-choose" for="${id}-file">${currentUrl ? "更换" : "添加"}</label>
   </section>
   <dialog class="app-dialog crop-dialog" data-crop-dialog>
     <div class="dialog-panel">
@@ -50,7 +50,7 @@ export function bindAvatarEditor(root) {
   const renderPreview = (value) => {
     input.value = value || "";
     preview.innerHTML = value ? `<img src="${esc(value)}" alt="">` : '<span class="avatar-placeholder">+</span>';
-    chooseLabel.textContent = value ? "更换" : "选择图片";
+    chooseLabel.textContent = value ? "更换" : "添加";
   };
 
   editor.resetAvatar = (value = "") => renderPreview(value);
