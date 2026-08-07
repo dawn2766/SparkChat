@@ -43,6 +43,12 @@
   user-select: none;
 }
 
+img {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
 html {
   width: 100%;
   min-height: 100%;
@@ -102,12 +108,6 @@ input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
 textarea {
   -webkit-appearance: none;
   appearance: none;
-}
-
-.bubble {
-  -webkit-touch-callout: default;
-  -webkit-user-select: text;
-  user-select: text;
 }
 
 button:focus-visible,

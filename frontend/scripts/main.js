@@ -26,13 +26,15 @@ function initializeHistory(route) {
 
 function normalizeSimpleInputs(root = document) {
   root.querySelectorAll("input, textarea").forEach((field) => {
-    if (field.closest(".auth-form") || ["file", "hidden"].includes(field.type)) return;
+    if (["file", "hidden"].includes(field.type)) return;
     field.setAttribute("autocomplete", "off");
     field.setAttribute("autocapitalize", "off");
     field.setAttribute("autocorrect", "off");
     field.setAttribute("spellcheck", "false");
     field.setAttribute("data-lpignore", "true");
     field.setAttribute("data-1p-ignore", "true");
+    field.setAttribute("data-bwignore", "true");
+    field.setAttribute("data-protonpass-ignore", "true");
   });
 }
 
@@ -114,6 +116,13 @@ function bindShell() {
   });
 }
 
+function bindNativeInteractionGuards() {
+  document.addEventListener("contextmenu", (event) => event.preventDefault());
+  document.addEventListener("dragstart", (event) => {
+    if (event.target instanceof HTMLImageElement) event.preventDefault();
+  });
+}
+
 function bindNavigationGestures() {
   const edgeWidth = 28;
   const triggerDistance = 72;
@@ -169,6 +178,7 @@ async function boot() {
 }
 
 app.setAttribute("data-app", "sparkchat");
+bindNativeInteractionGuards();
 bindCustomSelects(app);
 normalizeSimpleInputs(app);
 new MutationObserver(() => normalizeSimpleInputs(app)).observe(app, { childList: true, subtree: true });
