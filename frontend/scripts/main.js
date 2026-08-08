@@ -193,8 +193,22 @@ window.addEventListener("popstate", (event) => {
 bindNavigationGestures();
 boot();
 
+const SERVICE_WORKER_ENABLED = false;
+
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./service-worker.js").catch((error) => {
-    console.warn("Service worker registration failed", error);
-  });
+  if (SERVICE_WORKER_ENABLED) {
+    navigator.serviceWorker.register("./service-worker.js?enabled=1").catch((error) => {
+      console.warn("Service worker registration failed", error);
+    });
+  } else {
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .catch((error) => console.warn("Service worker cleanup failed", error));
+
+    if ("caches" in window) {
+      caches.keys()
+        .then((keys) => Promise.all(keys.filter((key) => key.startsWith("sparkchat-")).map((key) => caches.delete(key))))
+        .catch((error) => console.warn("Service worker cache cleanup failed", error));
+    }
+  }
 }

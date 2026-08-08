@@ -1,4 +1,5 @@
 const CACHE_NAME = "sparkchat-shell-v99";
+const SERVICE_WORKER_ENABLED = new URL(self.location.href).searchParams.get("enabled") === "1";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -26,6 +27,11 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
+  if (!SERVICE_WORKER_ENABLED) {
+    self.skipWaiting();
+    return;
+  }
+
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
       await Promise.all(
@@ -45,6 +51,16 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  if (!SERVICE_WORKER_ENABLED) {
+    event.waitUntil(
+      caches
+        .keys()
+        .then((keys) => Promise.all(keys.filter((key) => key.startsWith("sparkchat-")).map((key) => caches.delete(key))))
+        .then(() => self.registration.unregister())
+    );
+    return;
+  }
+
   event.waitUntil(
     caches
       .keys()
@@ -54,6 +70,10 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  if (!SERVICE_WORKER_ENABLED) {
+    return;
+  }
+
   const request = event.request;
   const url = new URL(request.url);
 

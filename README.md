@@ -155,4 +155,9 @@ Get-ChildItem frontend -Recurse -Filter *.js | ForEach-Object {
 
 PWA 安装与 service worker 仅在 HTTPS 或 `localhost` 安全上下文中启用。部署在 `/sparkchat/` 等子路径时，清单、API 和离线回退会沿当前应用路径解析。
 
+当前 service worker 默认关闭，以便开发期间立即获取前端修改。重新启用时，将
+`frontend/scripts/main.js` 中的 `SERVICE_WORKER_ENABLED` 改为 `true`，然后刷新页面；注册 URL
+会携带启用参数并恢复应用壳缓存。再次改为 `false` 后刷新，浏览器会注销现有注册并删除
+所有 `sparkchat-*` 缓存；若当前页面仍由旧 worker 控制，再刷新一次即可完全脱离控制。
+
 真实服务器验收需逐项检查登录、文本聊天、系统音色选择、朗读、听写、实时通话建连、字幕、音频播放、静音和挂断，并记录响应头 `X-Tt-Logid`。新增角色或编辑角色时，应确认 TTS 与实时通话返回同一个角色 `voiceId`。
