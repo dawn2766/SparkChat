@@ -143,9 +143,13 @@ export async function createRealtimeSession(character, handlers = {}, options = 
           handlers.onTranscript?.({ text: result.text, interim: result.is_interim });
         });
       }
-      if (message.event === 459 && userTurnText.trim()) {
-        handlers.onTurnComplete?.({ role: "user", content: userTurnText.trim() });
-        userTurnText = "";
+      if (message.event === 459) {
+        if (userTurnText.trim()) {
+          handlers.onTurnComplete?.({ role: "user", content: userTurnText.trim() });
+          userTurnText = "";
+        }
+        playbackInterrupted = false;
+        interruptedQuestionId = "";
       }
       if (message.event === 350 || message.event === 550) {
         const questionId = String(data.question_id || "");
@@ -164,9 +168,8 @@ export async function createRealtimeSession(character, handlers = {}, options = 
           if (!assistantSpokenText) handlers.onText?.(assistantChatText);
         }
         if (message.event === 350 && text) {
-          const resumesAfterInterrupt = interruptedQuestionId
-            ? questionId === interruptedQuestionId
-            : startsNewReply;
+          const resumesAfterInterrupt = startsNewReply
+            || Boolean(interruptedQuestionId && questionId && questionId !== interruptedQuestionId);
           if (playbackInterrupted && resumesAfterInterrupt) {
             playbackInterrupted = false;
             interruptedQuestionId = "";

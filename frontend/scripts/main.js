@@ -86,6 +86,10 @@ function showAuth(error = "", historyMode = "replace") {
 }
 
 async function renderRoute(route) {
+  if (currentRoute.name === "chat" && route.name !== "chat") {
+    const { stopVoiceInteraction } = await import("./views/chat.js");
+    await stopVoiceInteraction();
+  }
   if (!state.user || route.name === "auth") {
     showAuth("", null);
     return;

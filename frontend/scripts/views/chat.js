@@ -328,7 +328,6 @@ function bindMessageActions() {
       const message = translateButton.closest(".message");
       const bubble = message.querySelector(".bubble");
       if (message.dataset.translated === "true") {
-        stopSpeechAudio();
         bubble.textContent = message.dataset.originalContent;
         message.dataset.translated = "false";
         translateButton.setAttribute("aria-label", "翻译这条回复");
@@ -347,7 +346,6 @@ function bindMessageActions() {
         message.dataset.translated = "true";
         translateButton.setAttribute("aria-label", "显示原文");
         translateButton.classList.add("active");
-        stopSpeechAudio();
       } catch (error) {
         bubble.textContent = message.dataset.originalContent;
         notify(error.message);
@@ -753,6 +751,7 @@ async function renderVoiceRecordPage(conversation, dialog) {
   page.className = "voice-history-page";
   page.innerHTML = `<header class="page-heading"><button class="icon-button voice-history-back" type="button" aria-label="返回历史通话"><i data-lucide="arrow-left"></i></button><h1>和${esc(state.active.name)}的语音通话历史</h1></header><div class="messages scroll-container" id="voice-history-messages">${state.voiceMessages.map(voiceMessageMarkup).join("") || '<div class="history-empty">暂无通话记录</div>'}</div>`;
   document.body.append(page);
+  dialog.close();
   refreshIcons();
   page.querySelector(".voice-history-back").onclick = () => { page.remove(); dialog.showModal(); };
   page.querySelector("#voice-history-messages").onclick = bindVoiceMessageActions;
@@ -794,7 +793,7 @@ async function bindVoiceHistory(dialog, phone) {
         if (!shouldOpen) return;
         positionConversationMenu(dialog, event.currentTarget, menu);
       };
-      row.querySelector("[data-view-voice]").onclick = async () => { dialog.close(); await renderVoiceRecordPage(conversation, dialog); };
+      row.querySelector("[data-view-voice]").onclick = async () => { await renderVoiceRecordPage(conversation, dialog); };
       row.querySelector("[data-rename-voice]").onclick = () => {
         row.innerHTML = `<form class="conversation-edit"><input class="text-input" name="title" maxlength="80" required value="${esc(conversation.title)}" aria-label="通话名称"><button type="submit" aria-label="保存通话名称"><i data-lucide="check"></i></button><button type="button" data-cancel-voice-rename aria-label="取消重命名"><i data-lucide="x"></i></button></form>`;
         const form = row.querySelector("form");
@@ -849,12 +848,14 @@ async function startPhone() {
   const voiceConversation = await ensureVoiceConversation();
   const phone = document.createElement("div");
   phone.className = "phone-overlay connecting";
-  phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle user-subtitle" id="user-subtitle"></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"></div><div class="phone-live-actions"><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
+  phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle-stack"><div class="phone-subtitle user-subtitle" id="user-subtitle"><span class="phone-subtitle-title">用户</span><span class="phone-subtitle-text"></span></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"><span class="phone-subtitle-title">角色</span><span class="phone-subtitle-text"></span></div></div><div class="phone-live-actions"><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
   document.body.append(phone);
   refreshIcons();
   const statusText = phone.querySelector("#phone-status-text");
   const userSubtitle = phone.querySelector("#user-subtitle");
   const assistantSubtitle = phone.querySelector("#assistant-subtitle");
+  const userSubtitleText = userSubtitle.querySelector(".phone-subtitle-text");
+  const assistantSubtitleText = assistantSubtitle.querySelector(".phone-subtitle-text");
   const micButton = phone.querySelector("#toggle-mic");
   const liveCopy = phone.querySelector("[data-live-copy]");
   const liveTranslate = phone.querySelector("[data-live-translate]");
@@ -862,6 +863,11 @@ async function startPhone() {
   let muted = false;
   let volumeFrame = 0;
   let saveQueue = Promise.resolve();
+  const syncMicrophone = () => {
+    const historyVisible = Boolean(phone.querySelector("#voice-history-dialog[open]"))
+      || Boolean(document.querySelector(".voice-history-page"));
+    state.conversation?.mute(muted || historyVisible);
+  };
   const close = async () => {
     if (cancelled) return;
     cancelled = true;
@@ -872,9 +878,11 @@ async function startPhone() {
     if (conversation) await conversation.stop();
   };
   phone.querySelector("#end-call").onclick = close;
-  phone.querySelector("#phone-history").onclick = async () => { const dialog = phone.querySelector("#voice-history-dialog"); await bindVoiceHistory(dialog, phone); dialog.showModal(); };
-  liveCopy.onclick = async () => { if (assistantSubtitle.textContent.trim()) { await navigator.clipboard.writeText(assistantSubtitle.textContent); notify("已复制"); } };
-  liveTranslate.onclick = async () => { const id = liveTranslate.dataset.messageId; if (!id) return; if (liveTranslate.classList.contains("active")) { assistantSubtitle.textContent = liveTranslate.dataset.originalContent; liveTranslate.classList.remove("active"); return; } liveTranslate.disabled = true; try { assistantSubtitle.textContent = await streamVoiceTranslation(state.active.id, Number(id), (partial) => { assistantSubtitle.textContent = partial; }); liveTranslate.classList.add("active"); } catch (error) { notify(error.message); } finally { liveTranslate.disabled = false; } };
+  const voiceHistoryDialog = phone.querySelector("#voice-history-dialog");
+  voiceHistoryDialog.addEventListener("close", () => requestAnimationFrame(syncMicrophone));
+  phone.querySelector("#phone-history").onclick = async () => { state.conversation?.mute(true); await bindVoiceHistory(voiceHistoryDialog, phone); voiceHistoryDialog.showModal(); };
+  liveCopy.onclick = async () => { if (assistantSubtitleText.textContent.trim()) { await navigator.clipboard.writeText(assistantSubtitleText.textContent); notify("已复制"); } };
+  liveTranslate.onclick = async () => { const id = liveTranslate.dataset.messageId; if (!id) return; if (liveTranslate.classList.contains("active")) { assistantSubtitleText.textContent = liveTranslate.dataset.originalContent; liveTranslate.classList.remove("active"); return; } liveTranslate.disabled = true; try { assistantSubtitleText.textContent = await streamVoiceTranslation(state.active.id, Number(id), (partial) => { assistantSubtitleText.textContent = partial; }); liveTranslate.classList.add("active"); } catch (error) { notify(error.message); } finally { liveTranslate.disabled = false; } };
 
   const updateVolume = () => {
     if (cancelled || !state.conversation) return;
@@ -893,7 +901,7 @@ async function startPhone() {
   micButton.onclick = () => {
     if (!state.conversation?.mute) return;
     muted = !muted;
-    state.conversation.mute(muted);
+    syncMicrophone();
     micButton.classList.toggle("muted", muted);
     micButton.setAttribute("aria-label", muted ? "打开麦克风" : "关闭麦克风");
     micButton.innerHTML = `<i data-lucide="${muted ? "mic-off" : "mic"}"></i>`;
@@ -904,12 +912,12 @@ async function startPhone() {
       onReady: () => setMode("listening"),
       onText: (text) => {
         if (!text) return;
-        assistantSubtitle.textContent = text;
+        assistantSubtitleText.textContent = text;
       },
       onTranscript: (data) => {
-        userSubtitle.textContent = data.text || "";
+        userSubtitleText.textContent = data.text || "";
         userSubtitle.classList.toggle("interim", Boolean(data.interim));
-        if (!data.interim && data.text) assistantSubtitle.textContent = "";
+        if (!data.interim && data.text) assistantSubtitleText.textContent = "";
         setMode("listening");
       },
       onTurnComplete: async (turn) => {
@@ -924,7 +932,7 @@ async function startPhone() {
         await saveQueue;
       },
       onPlaybackChange: (playing) => setMode(playing ? "speaking" : "listening"),
-      onError: (error) => { assistantSubtitle.textContent = error?.message || "语音连接发生错误"; },
+      onError: (error) => { assistantSubtitleText.textContent = error?.message || "语音连接发生错误"; },
     }, { voiceConversationId: voiceConversation.id });
     if (cancelled) {
       await conversation.stop();
@@ -939,7 +947,7 @@ async function startPhone() {
     phone.classList.remove("connecting", "listening", "speaking");
     phone.classList.add("call-error");
     statusText.textContent = "连接失败";
-    assistantSubtitle.textContent = error.message || "无法接通语音模式";
+    assistantSubtitleText.textContent = error.message || "无法接通语音模式";
   }
 }
 

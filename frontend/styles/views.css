@@ -1561,16 +1561,28 @@
 
 .phone-subtitles {
   width: min(100%, 340px);
-  min-height: 126px;
+  min-height: 150px;
   display: grid;
   align-content: start;
   gap: 8px;
   margin-top: 10px;
 }
 
+.phone-subtitle-stack {
+  min-height: 136px;
+  max-height: min(38dvh, 390px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
 .phone-subtitle {
-  min-height: 52px;
-  padding: 8px 10px;
+  min-height: 64px;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 9px;
   border: 1px solid var(--line);
   background: rgb(255 255 255 / 3%);
   max-width: 330px;
@@ -1578,19 +1590,39 @@
   font-size: 14px;
   line-height: 1.65;
   letter-spacing: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
 }
 
-.phone-subtitle::before {
-  display: block;
-  margin-bottom: 3px;
+.phone-subtitle-title {
+  flex: 0 0 auto;
+  margin-bottom: 5px;
   color: var(--faint);
-  font: 8px var(--font-mono);
+  font: 600 11px var(--font-mono);
+}
+
+.phone-subtitle-text {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.phone-subtitle-text::-webkit-scrollbar {
+  width: 5px;
+}
+
+.phone-subtitle-text::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.phone-subtitle-text::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
 }
 
 .user-subtitle { color: var(--muted); }
-.user-subtitle::before { content: "用户"; }
-.assistant-subtitle::before { content: "角色"; color: var(--accent); }
+.assistant-subtitle .phone-subtitle-title { color: var(--accent); }
 .user-subtitle.interim { opacity: .65; }
 
 .phone-live-actions {
