@@ -73,7 +73,12 @@ globalThis.fetch = async () => new Response(JSON.stringify({
 }), { headers: { "Content-Type": "application/json" } });
 
 const { createRealtimeSession } = await import("../../frontend/scripts/doubao-realtime.js");
-const session = await createRealtimeSession({ id: 1, name: "测试角色" });
+const subtitles = [];
+let reportedUsage;
+const session = await createRealtimeSession({ id: 1, name: "测试角色" }, {
+  onText: (text) => subtitles.push(text),
+  onUsage: (usage) => { reportedUsage = usage; },
+});
 const pcm = new Int16Array([1000, -1000]).buffer;
 
 socket.emit(JSON.stringify({
@@ -90,9 +95,26 @@ assert.equal(startedNodes.length, 1, "用户话轮结束后应立即播放新回
 
 socket.emit(JSON.stringify({
   type: "event",
+  event: 154,
+  data: { usage: { input_audio_tokens: 42, output_text_tokens: 17 } },
+}));
+assert.deepEqual(reportedUsage, { input_audio_tokens: 42, output_text_tokens: 17 });
+
+socket.emit(JSON.stringify({
+  type: "event",
   event: 350,
   data: { question_id: "new-question", reply_id: "new-reply", text: "你好。" },
 }));
+socket.emit(JSON.stringify({
+  type: "event",
+  event: 550,
+  data: {
+    question_id: "new-question",
+    reply_id: "new-reply",
+    content: "（他停顿了一下。）你好。",
+  },
+}));
+assert.equal(subtitles.at(-1), "（他停顿了一下。）你好。", "完整模型文本中的舞台提示应进入字幕");
 socket.emit(pcm);
 assert.equal(startedNodes.length, 2, "字幕事件晚到时不应影响后续音频播放");
 

@@ -863,6 +863,19 @@ async function startPhone() {
   let muted = false;
   let volumeFrame = 0;
   let saveQueue = Promise.resolve();
+  const turnMessageIds = { user: 0, assistant: 0 };
+  let pendingUsage = null;
+  const saveTurnUsage = async () => {
+    if (!pendingUsage || !turnMessageIds.user || !turnMessageIds.assistant) return;
+    const usage = pendingUsage;
+    pendingUsage = null;
+    await api(
+      `/api/characters/${state.active.id}/voice-conversations/${voiceConversation.id}/usage`,
+      { method: "POST", body: JSON.stringify({ usage, messageIds: turnMessageIds }) },
+    );
+    turnMessageIds.user = 0;
+    turnMessageIds.assistant = 0;
+  };
   const syncMicrophone = () => {
     const historyVisible = Boolean(phone.querySelector("#voice-history-dialog[open]"))
       || Boolean(document.querySelector(".voice-history-page"));
@@ -923,12 +936,19 @@ async function startPhone() {
       onTurnComplete: async (turn) => {
         saveQueue = saveQueue.then(async () => {
           const saved = await saveVoiceTurn(turn);
+          if (saved) turnMessageIds[saved.role] = saved.id;
           if (saved?.role === "assistant") {
             liveTranslate.dataset.messageId = saved.id;
             liveTranslate.dataset.originalContent = saved.content;
             liveTranslate.classList.remove("active");
+            await saveTurnUsage();
           }
         }).catch((error) => notify(error.message));
+        await saveQueue;
+      },
+      onUsage: async (usage) => {
+        pendingUsage = usage;
+        saveQueue = saveQueue.then(saveTurnUsage).catch((error) => notify(error.message));
         await saveQueue;
       },
       onPlaybackChange: (playing) => setMode(playing ? "speaking" : "listening"),

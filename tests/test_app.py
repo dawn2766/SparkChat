@@ -848,7 +848,7 @@ class SparkChatApiTest(unittest.TestCase):
 
         self.assertEqual(
             config["instructions"],
-            build_agent_instructions(character, include_stage_directions=False),
+            build_agent_instructions(character),
         )
         self.assertEqual(config["language"], "en")
         self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
@@ -860,8 +860,8 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertNotIn("说话方式", payload["dialog"]["character_manifest"])
         self.assertEqual(payload["dialog"]["character_manifest"].count(language_constraint("en")), 1)
         self.assertIn("without sounding exaggerated or theatrical", payload["dialog"]["character_manifest"])
-        self.assertNotIn("Stage directions", payload["dialog"]["character_manifest"])
-        self.assertNotIn("most natural position", payload["dialog"]["character_manifest"])
+        self.assertIn("Optional expression", payload["dialog"]["character_manifest"])
+        self.assertIn("brief parenthetical", payload["dialog"]["character_manifest"])
         self.assertTrue(config["instructions"].startswith(language_constraint("en")))
         self.assertIn("regardless of the user's language", config["instructions"])
         self.assertIn("Never switch to Chinese or mirror the user's language", config["instructions"])
@@ -885,8 +885,9 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertTrue(text_instructions.startswith(language_constraint("zh")))
         self.assertTrue(realtime_config["instructions"].startswith(language_constraint("zh")))
         self.assertIn("可选表现", text_instructions)
-        self.assertNotIn("可选表现", realtime_config["instructions"])
-        self.assertNotIn("放在对话自然发生的位置", realtime_config["instructions"])
+        self.assertIn("可选表现", realtime_config["instructions"])
+        self.assertIn("中文全角括号", realtime_config["instructions"])
+        self.assertIn("放在对话自然发生的位置", realtime_config["instructions"])
         self.assertIn("绝不因为对话者使用英文而改用英文", realtime_config["instructions"])
 
         other_character = {**character, "name": "另一个角色", "persona": "活泼、坦率。", "language": "en"}
@@ -1108,6 +1109,24 @@ class SparkChatApiTest(unittest.TestCase):
             [message["content"] for message in messages],
             ["语音里的问题", "语音里的回答"],
         )
+        usage = self.client.post(
+            f"/api/characters/1/voice-conversations/{first_id}/usage",
+            json={
+                "usage": {"input_audio_tokens": 321, "output_text_tokens": 123},
+                "messageIds": {
+                    "user": messages[0]["id"],
+                    "assistant": messages[1]["id"],
+                },
+            },
+        )
+        self.assertEqual(usage.status_code, 200)
+        measured_messages = self.client.get(
+            f"/api/characters/1/voice-conversations/{first_id}/messages"
+        ).json["messages"]
+        self.assertEqual(
+            [message["token_count"] for message in measured_messages],
+            [321, 123],
+        )
         text_messages = self.client.get("/api/characters/1/conversations")
         self.assertNotIn(
             "语音里的回答",
@@ -1162,6 +1181,64 @@ class SparkChatApiTest(unittest.TestCase):
             ).status_code,
             404,
         )
+
+    def test_voice_memory_update_persists_both_languages_at_one_boundary(self):
+        from backend import app as token_server
+        from backend.app import get_db
+
+        self.login()
+        conversation_id = self.client.post(
+            "/api/characters/1/voice-conversations"
+        ).json["conversation"]["id"]
+        with self.app.app_context():
+            database = get_db()
+            inserted_message_ids = []
+            for role, content, token_count in (
+                ("user", "first question", 4000),
+                ("assistant", "first answer", 4000),
+                ("user", "current question", 1),
+            ):
+                cursor = database.execute(
+                    """
+                    INSERT INTO voice_messages (
+                        user_id, character_id, conversation_id, role, content, token_count
+                    ) VALUES (1, 1, ?, ?, ?, ?)
+                    """,
+                    (conversation_id, role, content, token_count),
+                )
+                inserted_message_ids.append(cursor.lastrowid)
+            database.commit()
+
+        calls = []
+
+        class FakeResponses:
+            @staticmethod
+            def create(**kwargs):
+                calls.append(kwargs)
+                text = "中文记忆" if "中文记忆" in kwargs["instructions"] else "English memory"
+                return type("MemoryResponse", (), {"output_text": text})()
+
+        original_responses = token_server.ark.responses
+        original_schedule = token_server.schedule_voice_memory_update
+        try:
+            token_server.ark.responses = FakeResponses()
+            token_server.schedule_voice_memory_update = lambda _conversation_id: None
+            token_server.run_voice_memory_update(conversation_id)
+        finally:
+            token_server.ark.responses = original_responses
+            token_server.schedule_voice_memory_update = original_schedule
+
+        with self.app.app_context():
+            memory = get_db().execute(
+                "SELECT * FROM voice_conversation_memories WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([call["max_output_tokens"] for call in calls], [1000, 1000])
+        self.assertEqual(memory["summary_zh"], "中文记忆")
+        self.assertEqual(memory["summary_en"], "English memory")
+        self.assertEqual(memory["covered_through_message_id_zh"], inserted_message_ids[1])
+        self.assertEqual(memory["covered_through_message_id_en"], inserted_message_ids[1])
 
     def test_edit_latest_user_message_rewrites_history_atomically(self):
         from backend import app as token_server

@@ -1,5 +1,5 @@
 import { api, apiUrl } from "./api.js";
-import { completeSubtitleSentence, mergeRealtimeText } from "./realtime-text.js";
+import { mergeRealtimeText } from "./realtime-text.js";
 
 function pcm16FromFloat32(samples) {
   const pcm = new ArrayBuffer(samples.length * 2);
@@ -128,6 +128,9 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         handlers.onError?.({ message: data.error || data.message || "豆包实时语音响应失败" });
         return;
       }
+      if (message.event === 154 && data.usage) {
+        handlers.onUsage?.(data.usage);
+      }
       if (message.event === 450) {
         interruptedQuestionId = String(data.question_id || "");
         playbackInterrupted = true;
@@ -165,7 +168,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         const text = assistantText(data);
         if (message.event === 550 && text) {
           assistantChatText = mergeRealtimeText(assistantChatText, text);
-          if (!assistantSpokenText) handlers.onText?.(assistantChatText);
+          handlers.onText?.(assistantChatText);
         }
         if (message.event === 350 && text) {
           const resumesAfterInterrupt = startsNewReply
@@ -174,11 +177,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
             playbackInterrupted = false;
             interruptedQuestionId = "";
           }
-          const sentence = completeSubtitleSentence(text, config.language);
-          const mergedText = mergeRealtimeText(assistantSpokenText, sentence);
+          const mergedText = mergeRealtimeText(assistantSpokenText, text);
           if (mergedText !== assistantSpokenText) {
             assistantSpokenText = mergedText;
-            handlers.onText?.(assistantSpokenText);
+            if (!assistantChatText) handlers.onText?.(assistantSpokenText);
           }
         }
       }

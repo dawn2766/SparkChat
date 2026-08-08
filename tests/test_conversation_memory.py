@@ -2,6 +2,8 @@ import unittest
 
 from backend.conversation_memory import (
     allocate_input_tokens,
+    fallback_token_count,
+    select_memory_batch,
     select_recent_messages,
     should_update_memory,
     stable_messages_for_memory,
@@ -13,6 +15,23 @@ def message(message_id, role="user", content="x", token_count=1):
 
 
 class ConversationMemoryTest(unittest.TestCase):
+    def test_fallback_token_count_uses_words_and_cjk_characters(self):
+        self.assertEqual(fallback_token_count("Hello, brave new world!"), 4)
+        self.assertEqual(fallback_token_count("你好 world"), 3)
+
+    def test_memory_batch_is_a_contiguous_prefix_near_interval(self):
+        messages = [
+            message(1, "user", token_count=3000),
+            message(2, "assistant", token_count=3000),
+            message(3, "user", token_count=3000),
+            message(4, "assistant", token_count=3000),
+            message(5, "user", token_count=1),
+        ]
+
+        batch = select_memory_batch(messages, 0, interval_tokens=8000)
+
+        self.assertEqual([item["id"] for item in batch], [1, 2])
+
     def test_recent_context_contains_every_uncovered_message(self):
         messages = [message(index, token_count=12000) for index in range(1, 8)]
         selected = select_recent_messages(messages, covered_through_message_id=2)

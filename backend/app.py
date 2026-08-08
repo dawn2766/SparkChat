@@ -18,8 +18,12 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .avatar_storage import AVATAR_DATA_URL, store_avatar_snapshot
 from .conversation_memory import (
+    VOICE_MEMORY_UPDATE_INTERVAL_TOKENS,
+    VOICE_RECENT_CONTEXT_MAX_TOKENS,
     allocate_input_tokens,
+    fallback_token_count,
     message_token_count,
+    select_memory_batch,
     select_recent_messages,
     should_update_memory,
     stable_messages_for_memory,
@@ -67,6 +71,7 @@ persona_translation_executor = ThreadPoolExecutor(
 memory_jobs = set()
 memory_jobs_lock = threading.Lock()
 voice_memory_jobs = set()
+voice_memory_reruns = set()
 voice_memory_jobs_lock = threading.Lock()
 persona_translation_jobs = set()
 persona_translation_jobs_lock = threading.Lock()
@@ -235,7 +240,7 @@ def build_agent_instructions(character, include_stage_directions=True):
 def realtime_character_config(character):
     language = normalize_prompt_language(character["language"])
     return {
-        "instructions": build_agent_instructions(character, include_stage_directions=False),
+        "instructions": build_agent_instructions(character),
         "language": language,
         "speakingStyle": REALTIME_SPEAKING_STYLES[language],
     }
@@ -332,6 +337,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS conversation_memories (
             conversation_id INTEGER PRIMARY KEY,
             summary TEXT NOT NULL DEFAULT '',
+            summary_zh TEXT,
+            summary_en TEXT,
             covered_through_message_id INTEGER NOT NULL DEFAULT 0,
             covered_through_message_id_zh INTEGER NOT NULL DEFAULT 0,
             covered_through_message_id_en INTEGER NOT NULL DEFAULT 0,
@@ -365,6 +372,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS voice_conversation_memories (
             conversation_id INTEGER PRIMARY KEY,
             summary TEXT NOT NULL DEFAULT '',
+            summary_zh TEXT,
+            summary_en TEXT,
             covered_through_message_id INTEGER NOT NULL DEFAULT 0,
             covered_through_message_id_zh INTEGER NOT NULL DEFAULT 0,
             covered_through_message_id_en INTEGER NOT NULL DEFAULT 0,
@@ -474,6 +483,20 @@ def init_db():
     )
     database.execute(
         """
+        UPDATE voice_conversation_memories
+        SET summary_en = summary
+        WHERE summary_en IS NULL AND EXISTS (
+            SELECT 1 FROM voice_conversations vc
+            JOIN characters c ON c.id = vc.character_id
+            LEFT JOIN character_overrides o
+                ON o.character_id = c.id AND o.user_id = vc.user_id
+            WHERE vc.id = voice_conversation_memories.conversation_id
+                AND COALESCE(o.language, c.language) = 'en'
+        )
+        """
+    )
+    database.execute(
+        """
         UPDATE conversation_memories
         SET covered_through_message_id_zh = covered_through_message_id
         WHERE covered_through_message_id_zh = 0 AND covered_through_message_id > 0
@@ -484,6 +507,22 @@ def init_db():
         UPDATE voice_conversation_memories
         SET covered_through_message_id_zh = covered_through_message_id
         WHERE covered_through_message_id_zh = 0 AND covered_through_message_id > 0
+        """
+    )
+    database.execute(
+        """
+        UPDATE voice_conversation_memories
+        SET covered_through_message_id_en = covered_through_message_id
+        WHERE covered_through_message_id_en = 0
+            AND covered_through_message_id > 0
+            AND EXISTS (
+                SELECT 1 FROM voice_conversations vc
+                JOIN characters c ON c.id = vc.character_id
+                LEFT JOIN character_overrides o
+                    ON o.character_id = c.id AND o.user_id = vc.user_id
+                WHERE vc.id = voice_conversation_memories.conversation_id
+                    AND COALESCE(o.language, c.language) = 'en'
+            )
         """
     )
     message_columns = {row["name"] for row in database.execute("PRAGMA table_info(messages)").fetchall()}
@@ -497,6 +536,18 @@ def init_db():
     database.execute(
         "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id)"
     )
+    voice_message_columns = {
+        row["name"] for row in database.execute("PRAGMA table_info(voice_messages)").fetchall()
+    }
+    if "token_count" not in voice_message_columns:
+        database.execute("ALTER TABLE voice_messages ADD COLUMN token_count INTEGER")
+    for row in database.execute(
+        "SELECT id, content FROM voice_messages WHERE token_count IS NULL"
+    ).fetchall():
+        database.execute(
+            "UPDATE voice_messages SET token_count = ? WHERE id = ?",
+            (fallback_token_count(row["content"]), row["id"]),
+        )
     legacy_threads = database.execute(
         """
         SELECT user_id, character_id, MIN(created_at) AS created_at, MAX(created_at) AS updated_at
@@ -1433,7 +1484,7 @@ def list_voice_messages(character_id, conversation_id):
     if get_voice_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该语音通话"), 404
     rows = get_db().execute(
-        "SELECT id, role, content, created_at FROM voice_messages WHERE conversation_id = ? ORDER BY id",
+        "SELECT id, role, content, token_count, created_at FROM voice_messages WHERE conversation_id = ? ORDER BY id",
         (conversation_id,),
     ).fetchall()
     return jsonify(messages=[dict(row) for row in rows])
@@ -1457,7 +1508,10 @@ def create_voice_message(character_id, conversation_id):
         INSERT INTO voice_messages (user_id, character_id, conversation_id, role, content, token_count)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (session["user_id"], character_id, conversation_id, role, content, max(1, len(content))),
+        (
+            session["user_id"], character_id, conversation_id,
+            role, content, fallback_token_count(content),
+        ),
     )
     if role == "user" and not conversation["title_custom"]:
         first_user = get_db().execute(
@@ -1477,10 +1531,57 @@ def create_voice_message(character_id, conversation_id):
     if role == "assistant":
         schedule_voice_memory_update(conversation_id)
     row = get_db().execute(
-        "SELECT id, role, content, created_at FROM voice_messages WHERE id = ?",
+        "SELECT id, role, content, token_count, created_at FROM voice_messages WHERE id = ?",
         (cursor.lastrowid,),
     ).fetchone()
     return jsonify(message=dict(row)), 201
+
+
+@app.post("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/usage")
+@login_required
+def update_voice_turn_usage(character_id, conversation_id):
+    if get_character(character_id) is None:
+        return jsonify(error="未找到该角色"), 404
+    if get_voice_conversation(character_id, conversation_id) is None:
+        return jsonify(error="未找到该语音通话"), 404
+    payload = request.get_json(silent=True) or {}
+    usage = payload.get("usage") or {}
+    message_ids = payload.get("messageIds") or {}
+    try:
+        user_tokens = max(
+            0,
+            int(usage.get("input_text_tokens", 0) or 0)
+            + int(usage.get("input_audio_tokens", 0) or 0),
+        )
+        assistant_tokens = max(0, int(usage.get("output_text_tokens", 0) or 0))
+        user_message_id = int(message_ids.get("user", 0) or 0)
+        assistant_message_id = int(message_ids.get("assistant", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify(error="语音用量信息无效"), 400
+    updates = (
+        (user_message_id, "user", user_tokens),
+        (assistant_message_id, "assistant", assistant_tokens),
+    )
+    for message_id, role, token_count in updates:
+        if not message_id or not token_count:
+            continue
+        cursor = get_db().execute(
+            """
+            UPDATE voice_messages SET token_count = ?
+            WHERE id = ? AND conversation_id = ? AND user_id = ?
+                AND character_id = ? AND role = ?
+            """,
+            (
+                token_count, message_id, conversation_id,
+                session["user_id"], character_id, role,
+            ),
+        )
+        if cursor.rowcount != 1:
+            get_db().rollback()
+            return jsonify(error="语音用量对应的消息无效"), 409
+    get_db().commit()
+    schedule_voice_memory_update(conversation_id)
+    return jsonify(ok=True)
 
 
 def memory_column(language, base_name):
@@ -1502,7 +1603,9 @@ def voice_conversation_context(database, conversation_id, language="zh"):
         (conversation_id,),
     ).fetchall()
     messages = [dict(row) for row in rows]
-    recent = select_recent_messages(messages, covered_through)
+    recent = select_recent_messages(
+        messages, covered_through, VOICE_RECENT_CONTEXT_MAX_TOKENS
+    )
     return (memory["summary"].strip() if memory else ""), recent
 
 
@@ -1523,14 +1626,13 @@ def run_voice_memory_update(conversation_id):
             ).fetchone()
             if conversation is None:
                 return
-            language = normalize_prompt_language(conversation["language"])
-            summary_column = memory_column(language, "summary")
-            covered_column = memory_column(language, "covered_through_message_id")
             memory = database.execute(
-                f"SELECT {summary_column} AS summary, {covered_column} AS covered_through_message_id FROM voice_conversation_memories WHERE conversation_id = ?",
+                """
+                SELECT summary_zh, summary_en, covered_through_message_id
+                FROM voice_conversation_memories WHERE conversation_id = ?
+                """,
                 (conversation_id,),
             ).fetchone()
-            previous_summary = memory["summary"] if memory else ""
             covered_through = memory["covered_through_message_id"] if memory else 0
             messages = [
                 dict(row) for row in database.execute(
@@ -1538,62 +1640,82 @@ def run_voice_memory_update(conversation_id):
                     (conversation_id,),
                 ).fetchall()
             ]
-            stable_messages = stable_messages_for_memory(messages, covered_through)
-            if not should_update_memory(messages, covered_through) or not stable_messages:
+            memory_batch = select_memory_batch(
+                messages, covered_through, VOICE_MEMORY_UPDATE_INTERVAL_TOKENS
+            )
+            if not memory_batch:
                 return
-            new_covered_through = stable_messages[-1]["id"]
-            role_labels = ("用户", "数字角色") if language == "zh" else ("User", "Character")
-            transcript = "\n".join(
-                f"{role_labels[0] if row['role'] == 'user' else role_labels[1]}: {row['content']}"
-                for row in stable_messages
-            )
-            memory_input = (
-                f"旧记忆：\n{previous_summary or '（空）'}\n\n新增语音通话：\n{transcript}"
-                if language == "zh"
-                else f"Previous memory:\n{previous_summary or '(empty)'}\n\nNew voice conversation:\n{transcript}"
-            )
-            response = ark.responses.create(
-                model=MEMORY_MODEL,
-                instructions=MEMORY_PROMPTS[language],
-                input=[{"role": "user", "content": memory_input}],
-                extra_body={"thinking": {"type": "disabled"}},
-            )
-            summary = str(getattr(response, "output_text", "") or "").strip()
-            if not summary:
-                raise RuntimeError("Memory model returned no content")
+            new_covered_through = memory_batch[-1]["id"]
+            summaries = {}
+            for language in ("zh", "en"):
+                role_labels = ("用户", "数字角色") if language == "zh" else ("User", "Character")
+                transcript = "\n".join(
+                    f"{role_labels[0] if row['role'] == 'user' else role_labels[1]}: {row['content']}"
+                    for row in memory_batch
+                )
+                previous_summary = memory[f"summary_{language}"] if memory else ""
+                memory_input = (
+                    f"旧记忆：\n{previous_summary or '（空）'}\n\n新增语音通话：\n{transcript}"
+                    if language == "zh"
+                    else f"Previous memory:\n{previous_summary or '(empty)'}\n\nNew voice conversation:\n{transcript}"
+                )
+                response = ark.responses.create(
+                    model=MEMORY_MODEL,
+                    instructions=MEMORY_PROMPTS[language],
+                    input=[{"role": "user", "content": memory_input}],
+                    max_output_tokens=1000,
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
+                summaries[language] = str(
+                    getattr(response, "output_text", "") or ""
+                ).strip()
+                if not summaries[language]:
+                    raise RuntimeError(f"Memory model returned no {language} content")
             database.execute(
-                f"""
+                """
                 INSERT INTO voice_conversation_memories (
                     conversation_id, summary, covered_through_message_id,
-                    {summary_column}, {covered_column}, updated_at
+                    summary_zh, summary_en,
+                    covered_through_message_id_zh, covered_through_message_id_en,
+                    updated_at
                 )
-                SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                SELECT ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
                 WHERE EXISTS (SELECT 1 FROM voice_conversations WHERE id = ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     summary = excluded.summary,
                     covered_through_message_id = excluded.covered_through_message_id,
-                    {summary_column} = excluded.{summary_column},
-                    {covered_column} = excluded.{covered_column},
+                    summary_zh = excluded.summary_zh,
+                    summary_en = excluded.summary_en,
+                    covered_through_message_id_zh = excluded.covered_through_message_id_zh,
+                    covered_through_message_id_en = excluded.covered_through_message_id_en,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE voice_conversation_memories.{covered_column} = ?
+                WHERE voice_conversation_memories.covered_through_message_id = ?
                 """,
                 (
-                    conversation_id, summary, new_covered_through,
-                    summary, new_covered_through,
+                    conversation_id, summaries["zh"], new_covered_through,
+                    summaries["zh"], summaries["en"],
+                    new_covered_through, new_covered_through,
                     conversation_id, covered_through,
                 ),
             )
             database.commit()
+            with voice_memory_jobs_lock:
+                voice_memory_reruns.add(conversation_id)
     except Exception:
         app.logger.exception("Voice conversation memory update failed for conversation %s", conversation_id)
     finally:
         with voice_memory_jobs_lock:
             voice_memory_jobs.discard(conversation_id)
+            rerun = conversation_id in voice_memory_reruns
+            voice_memory_reruns.discard(conversation_id)
+        if rerun:
+            schedule_voice_memory_update(conversation_id)
 
 
 def schedule_voice_memory_update(conversation_id):
     with voice_memory_jobs_lock:
         if conversation_id in voice_memory_jobs:
+            voice_memory_reruns.add(conversation_id)
             return
         voice_memory_jobs.add(conversation_id)
     try:
@@ -1601,6 +1723,7 @@ def schedule_voice_memory_update(conversation_id):
     except Exception:
         with voice_memory_jobs_lock:
             voice_memory_jobs.discard(conversation_id)
+            voice_memory_reruns.discard(conversation_id)
         app.logger.exception("Unable to schedule voice conversation memory update")
 
 
