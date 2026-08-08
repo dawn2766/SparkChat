@@ -2,6 +2,10 @@ const appBase = location.pathname.replace(/\/?(?:index\.html)?$/i, "").replace(/
 
 export const apiUrl = (path) => `${appBase}${path}`;
 
+function responseErrorMessage(response, data) {
+  return data?.error || `请求失败 (${response.status})`;
+}
+
 export async function api(url, options = {}) {
   const response = await fetch(apiUrl(url), {
     credentials: "same-origin",
@@ -11,7 +15,7 @@ export async function api(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (data.actionUrl) window.open(data.actionUrl, "_blank", "noopener,noreferrer");
-    const error = Error(data.error || "请求失败");
+    const error = Error(responseErrorMessage(response, data));
     error.actionUrl = data.actionUrl;
     error.logId = data.logId;
     throw error;
@@ -28,7 +32,7 @@ async function streamResponse(path, body, onDelta, emptyMessage) {
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw Error(data.error || `请求失败 (${response.status})`);
+    throw Error(responseErrorMessage(response, data));
   }
   if (!response.body) throw Error("浏览器不支持流式响应");
 

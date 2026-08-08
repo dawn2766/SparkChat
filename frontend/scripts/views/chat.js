@@ -845,7 +845,18 @@ async function bindVoiceMessageActions(event) {
 }
 
 async function startPhone() {
-  const voiceConversation = await ensureVoiceConversation();
+  const callButton = document.querySelector("#call");
+  if (callButton?.disabled) return;
+  if (callButton) callButton.disabled = true;
+  let voiceConversation;
+  try {
+    voiceConversation = await ensureVoiceConversation();
+  } catch (error) {
+    notify(error.message || "无法准备语音通话");
+    if (callButton) callButton.disabled = false;
+    return;
+  }
+  if (callButton) callButton.disabled = false;
   const phone = document.createElement("div");
   phone.className = "phone-overlay connecting";
   phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle-stack"><div class="phone-subtitle user-subtitle" id="user-subtitle"><span class="phone-subtitle-title">用户</span><span class="phone-subtitle-text"></span></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"><span class="phone-subtitle-title">角色</span><span class="phone-subtitle-text"></span></div></div><div class="phone-live-actions"><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
