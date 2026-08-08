@@ -24,11 +24,6 @@ from .model_config import REALTIME_LEGACY_MODEL, REALTIME_O2_MODEL, REALTIME_SC2
 load_dotenv()
 
 DOUBAO_REALTIME_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
-REALTIME_SPEAKING_STYLES = {
-    "zh": "请自然地说话，符合当前语境和情绪，不要过度夸张或戏剧化。",
-    "en": "Speak naturally, matching the context and emotion without sounding exaggerated or theatrical.",
-}
-SPEAKING_STYLE_LABELS = {"zh": "说话方式", "en": "Speaking style"}
 logger = logging.getLogger("sparkchat.realtime")
 
 
@@ -59,7 +54,6 @@ def session_payload(config):
     speaker_id = config["speakerId"]
     language = normalize_prompt_language(config.get("language"))
     instructions = config["instructions"]
-    speaking_style = config.get("speakingStyle", REALTIME_SPEAKING_STYLES[language])
     is_o2_clone = speaker_id.startswith("ICL_uranus_")
     is_sc2_voice = speaker_id.startswith(("S_", "ICL_", "saturn_", "sparkchat_", "custom_")) and not is_o2_clone
     payload = {
@@ -75,14 +69,13 @@ def session_payload(config):
     payload["tts"]["extra"] = {"explicit_language": language}
     if is_sc2_voice:
         payload["dialog"] = {
-            "character_manifest": f"{instructions}\n\n{SPEAKING_STYLE_LABELS[language]}: {speaking_style}",
+            "character_manifest": instructions,
             "extra": {"model": REALTIME_SC2_MODEL, "input_mod": "keep_alive"},
         }
     else:
         payload["dialog"] = {
             "bot_name": config.get("name", "数字角色")[:20],
             "system_role": instructions,
-            "speaking_style": speaking_style,
             "extra": {"model": REALTIME_O2_MODEL if is_o2_clone else REALTIME_LEGACY_MODEL, "input_mod": "keep_alive"},
         }
     return payload

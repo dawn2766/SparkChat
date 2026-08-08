@@ -69,7 +69,6 @@ globalThis.fetch = async () => new Response(JSON.stringify({
   speakerId: "test-speaker",
   language: "zh",
   instructions: "",
-  speakingStyle: "",
 }), { headers: { "Content-Type": "application/json" } });
 
 const { createRealtimeSession } = await import("../../frontend/scripts/doubao-realtime.js");

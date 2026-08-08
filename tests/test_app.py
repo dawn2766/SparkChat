@@ -821,7 +821,6 @@ class SparkChatApiTest(unittest.TestCase):
             "speakerId": "ICL_uranus_6a6d9cd9d9b89695",
             "language": "en",
             "instructions": "Use English.",
-            "speakingStyle": "Speak as a controlled commander.",
         })
 
         self.assertEqual(payload["tts"]["speaker"], "ICL_uranus_6a6d9cd9d9b89695")
@@ -830,12 +829,11 @@ class SparkChatApiTest(unittest.TestCase):
             payload["dialog"]["system_role"],
             "Use English.",
         )
-        self.assertEqual(payload["dialog"]["speaking_style"], "Speak as a controlled commander.")
+        self.assertNotIn("speaking_style", payload["dialog"])
 
     def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
         from backend.realtime_server import session_payload
         from backend.app import build_agent_instructions, language_constraint, realtime_character_config
-        from backend.realtime_server import REALTIME_SPEAKING_STYLES
 
         character = {
             "name": "Megatron",
@@ -852,16 +850,14 @@ class SparkChatApiTest(unittest.TestCase):
         )
         self.assertEqual(config["language"], "en")
         self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
-        self.assertEqual(config["speakingStyle"], REALTIME_SPEAKING_STYLES["en"])
         self.assertIn("Character name: Megatron", config["instructions"])
         self.assertIn("Identity and background: Identity", config["instructions"])
-        self.assertIn("Speaking style: Speak naturally, matching the context and emotion", payload["dialog"]["character_manifest"])
         self.assertNotIn("角色名称", config["instructions"])
         self.assertNotIn("说话方式", payload["dialog"]["character_manifest"])
         self.assertEqual(payload["dialog"]["character_manifest"].count(language_constraint("en")), 1)
-        self.assertIn("without sounding exaggerated or theatrical", payload["dialog"]["character_manifest"])
         self.assertIn("Optional expression", payload["dialog"]["character_manifest"])
-        self.assertIn("brief parenthetical", payload["dialog"]["character_manifest"])
+        self.assertIn("English half-width parenthetical", payload["dialog"]["character_manifest"])
+        self.assertIn("(He studies you for a moment, then softens.)", payload["dialog"]["character_manifest"])
         self.assertTrue(config["instructions"].startswith(language_constraint("en")))
         self.assertIn("regardless of the user's language", config["instructions"])
         self.assertIn("Never switch to Chinese or mirror the user's language", config["instructions"])
@@ -892,10 +888,9 @@ class SparkChatApiTest(unittest.TestCase):
 
         other_character = {**character, "name": "另一个角色", "persona": "活泼、坦率。", "language": "en"}
         self.assertNotEqual(
-            realtime_config["speakingStyle"],
-            realtime_character_config(other_character)["speakingStyle"],
+            realtime_config["instructions"],
+            realtime_character_config(other_character)["instructions"],
         )
-        self.assertEqual(realtime_config["speakingStyle"], "请自然地说话，符合当前语境和情绪，不要过度夸张或戏剧化。")
 
         fallback_character = {**character, "language": "ja"}
         fallback_config = realtime_character_config(fallback_character)
@@ -905,7 +900,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("角色名称: 测试角色", fallback_config["instructions"])
         self.assertIn("身份背景: 沉着、可靠。", fallback_config["instructions"])
         self.assertIn("回答要求：", fallback_config["instructions"])
-        self.assertIn("说话方式: 请自然地说话，符合当前语境和情绪", fallback_payload["dialog"]["character_manifest"])
+        self.assertNotIn("说话方式", fallback_payload["dialog"]["character_manifest"])
 
     def test_character_model_is_used_for_text_generation(self):
         from backend import app as token_server

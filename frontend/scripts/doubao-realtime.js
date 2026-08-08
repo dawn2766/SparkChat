@@ -200,7 +200,6 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         name: character.name,
         language: config.language,
         instructions: config.instructions,
-        speakingStyle: config.speakingStyle,
       }));
       resolve();
     };

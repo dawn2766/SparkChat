@@ -29,7 +29,7 @@ from .conversation_memory import (
     stable_messages_for_memory,
 )
 from .model_config import CHAT_MODELS, DEFAULT_CHAT_MODEL, MEMORY_MODEL, TRANSLATION_MODEL
-from .realtime_server import REALTIME_SPEAKING_STYLES, normalize_prompt_language
+from .realtime_server import normalize_prompt_language
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
 load_dotenv()
@@ -104,7 +104,7 @@ You are the person described in the character profile, not customer support or a
 }
 STAGE_DIRECTION_PROMPTS = {
     "zh": "可选表现：只在动作、表情、停顿或声线变化确实外化了当下情绪时，偶尔在句首用简短的中文全角括号写出，例如“（他看了你一会儿，语气缓下来）”。它不是每轮必需，也不是营造人设的装饰。放在对话自然发生的位置；不要连续堆叠，不要描写对方看不见的内心独白，不要凭空创造场景、身体接触或现实行动，也不要用它代替真正要说的话。",
-    "en": "Optional expression: Only when an action, expression, pause, or vocal shift genuinely reveals the present emotion, you may occasionally render it at the beginning of a sentence in a brief parenthetical, such as “(He studies you for a moment, then softens.)” It is neither required each turn nor decoration for displaying the persona. Place it where it naturally occurs in the exchange. Do not stack directions, narrate inaccessible inner thoughts, invent settings, physical contact, or real-world actions, or use a direction in place of what needs to be said.",
+    "en": "Optional expression: Only when an action, expression, pause, or vocal shift genuinely reveals the present emotion, you may occasionally render it at the beginning of a sentence in a brief English half-width parenthetical, such as \"(He studies you for a moment, then softens.)\" It is neither required each turn nor decoration for displaying the persona. Place it where it naturally occurs in the exchange. Do not stack directions, narrate inaccessible inner thoughts, invent settings, physical contact, or real-world actions, or use a direction in place of what needs to be said.",
 }
 SYSTEM_PROMPTS = {
     language: f"{prompt}\n{STAGE_DIRECTION_PROMPTS[language]}"
@@ -226,8 +226,8 @@ def character_instructions(character, language=None):
 def language_constraint(language):
     language = normalize_prompt_language(language)
     if language == "en":
-        return "Speak English only. Every audible reply and every live transcript must be entirely in English, regardless of the user's language or any language in the character profile. Never switch to Chinese or mirror the user's language. Do not translate before answering. Keep non-English names, code, URLs, or very short quotations only when strictly necessary for accuracy."
-    return "只用中文回答。无论对话者说什么语言、角色设定中出现什么语言，所有可听见的回复和实时转写都必须使用简体中文。绝不因为对话者使用英文而改用英文，也不要先翻译再回答。只有专有名词、代码、URL 或准确性确实需要时，才保留极短的外文片段。"
+        return "Speak English only. Every reply must be entirely in English, regardless of the user's language or any language in the character profile. Never switch to Chinese or mirror the user's language. Do not translate before answering. Keep non-English names, code, URLs, or very short quotations only when strictly necessary for accuracy."
+    return "只用中文回答。无论对话者说什么语言、角色设定中出现什么语言，所有回复都必须使用简体中文。绝不因为对话者使用英文而改用英文，也不要先翻译再回答。只有专有名词、代码、URL 或准确性确实需要时，才保留极短的外文片段。"
 
 
 def build_agent_instructions(character, include_stage_directions=True):
@@ -242,7 +242,6 @@ def realtime_character_config(character):
     return {
         "instructions": build_agent_instructions(character),
         "language": language,
-        "speakingStyle": REALTIME_SPEAKING_STYLES[language],
     }
 
 
@@ -2620,7 +2619,6 @@ def get_token():
         speakerId=speaker_id,
         language=realtime_config["language"],
         instructions=realtime_config["instructions"],
-        speakingStyle=realtime_config["speakingStyle"],
         characterId=character["id"],
         voiceConversationId=voice_conversation_id,
     )
