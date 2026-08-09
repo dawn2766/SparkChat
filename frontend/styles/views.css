@@ -1147,6 +1147,7 @@
 }
 
 .message {
+  min-width: 0;
   max-width: min(84%, 540px);
   display: flex;
   align-items: end;
@@ -1155,6 +1156,7 @@
 
 .message-content {
   min-width: 0;
+  max-width: 100%;
 }
 
 .message.user {
@@ -1163,6 +1165,7 @@
 }
 
 .bubble {
+  max-width: 100%;
   padding: 11px 14px;
   color: var(--ink);
   border: 1px solid var(--line);
@@ -1171,6 +1174,7 @@
   font-size: var(--text-md);
   line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message.user .bubble {
@@ -1624,6 +1628,23 @@
 .user-subtitle { color: var(--muted); }
 .assistant-subtitle .phone-subtitle-title { color: var(--accent); }
 .user-subtitle.interim { opacity: .65; }
+
+.withdraw-voice-turn {
+  min-height: 28px;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 3px 7px;
+  color: var(--muted);
+  background: transparent;
+  font: 500 12px var(--font-ui);
+}
+
+.withdraw-voice-turn:hover { color: var(--ink); }
+.withdraw-voice-turn:disabled { opacity: .45; }
+.withdraw-voice-turn svg { width: 14px; height: 14px; }
 
 .phone-live-actions {
   min-height: 22px;

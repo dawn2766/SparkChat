@@ -1,4 +1,4 @@
-import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import { api, apiUrl, streamChat, streamTranslation, streamVoiceTranslation } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
@@ -6,7 +6,7 @@ import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, confirmDeletion, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 
-const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Volume2, X } });
+const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Volume2, X } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -465,9 +465,11 @@ async function toggleDictation() {
         if (!data.text) return;
         const mergedText = mergeRealtimeText(committedText, data.text);
         textarea.value = `${initialText}${initialText && mergedText ? " " : ""}${mergedText}`;
-        if (!data.interim) committedText = mergedText;
         resizeComposer(textarea);
         updateComposerState(textarea);
+      },
+      onTurnComplete: (turn) => {
+        if (turn.role === "user") committedText = mergeRealtimeText(committedText, turn.content);
       },
       onError: (error) => notify(error.message || "未能识别语音"),
       onClose: () => {
@@ -702,7 +704,9 @@ async function saveVoiceTurn(turn) {
     method: "POST",
     body: JSON.stringify(turn),
   });
-  state.voiceMessages.push(result.message);
+  if (!state.voiceMessages.some((message) => message.id === result.message.id)) {
+    state.voiceMessages.push(result.message);
+  }
   Object.assign(state.activeVoiceConversation, {
     title: state.activeVoiceConversation.title === "新通话" && turn.role === "user" ? turn.content.slice(0, 80) : state.activeVoiceConversation.title,
     lastMessage: turn.content,
@@ -859,7 +863,7 @@ async function startPhone() {
   if (callButton) callButton.disabled = false;
   const phone = document.createElement("div");
   phone.className = "phone-overlay connecting";
-  phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle-stack"><div class="phone-subtitle user-subtitle" id="user-subtitle"><span class="phone-subtitle-title">用户</span><span class="phone-subtitle-text"></span></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"><span class="phone-subtitle-title">角色</span><span class="phone-subtitle-text"></span></div></div><div class="phone-live-actions"><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
+  phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle-stack"><div class="phone-subtitle user-subtitle" id="user-subtitle"><span class="phone-subtitle-title">用户</span><span class="phone-subtitle-text"></span><button class="withdraw-voice-turn hidden" type="button" aria-label="撤回本轮语音输入"><i data-lucide="undo-2"></i><span>撤回</span></button></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"><span class="phone-subtitle-title">角色</span><span class="phone-subtitle-text"></span></div></div><div class="phone-live-actions"><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
   document.body.append(phone);
   refreshIcons();
   const statusText = phone.querySelector("#phone-status-text");
@@ -870,22 +874,25 @@ async function startPhone() {
   const micButton = phone.querySelector("#toggle-mic");
   const liveCopy = phone.querySelector("[data-live-copy]");
   const liveTranslate = phone.querySelector("[data-live-translate]");
+  const withdrawTurnButton = phone.querySelector(".withdraw-voice-turn");
   let cancelled = false;
   let muted = false;
   let volumeFrame = 0;
   let saveQueue = Promise.resolve();
-  const turnMessageIds = { user: 0, assistant: 0 };
-  let pendingUsage = null;
-  const saveTurnUsage = async () => {
-    if (!pendingUsage || !turnMessageIds.user || !turnMessageIds.assistant) return;
-    const usage = pendingUsage;
-    pendingUsage = null;
+  const turnMessageIds = new Map();
+  const pendingUsage = new Map();
+  const withdrawnTurnIds = new Set();
+  let withdrawableTurnId = "";
+  const saveTurnUsage = async (turnId) => {
+    const usage = pendingUsage.get(turnId);
+    const messageIds = turnMessageIds.get(turnId);
+    if (!usage || !messageIds?.user || !messageIds?.assistant) return;
+    pendingUsage.delete(turnId);
     await api(
       `/api/characters/${state.active.id}/voice-conversations/${voiceConversation.id}/usage`,
-      { method: "POST", body: JSON.stringify({ usage, messageIds: turnMessageIds }) },
+      { method: "POST", body: JSON.stringify({ usage, messageIds }) },
     );
-    turnMessageIds.user = 0;
-    turnMessageIds.assistant = 0;
+    turnMessageIds.delete(turnId);
   };
   const syncMicrophone = () => {
     const historyVisible = Boolean(phone.querySelector("#voice-history-dialog[open]"))
@@ -907,6 +914,38 @@ async function startPhone() {
   phone.querySelector("#phone-history").onclick = async () => { state.conversation?.mute(true); await bindVoiceHistory(voiceHistoryDialog, phone); voiceHistoryDialog.showModal(); };
   liveCopy.onclick = async () => { if (assistantSubtitleText.textContent.trim()) { await navigator.clipboard.writeText(assistantSubtitleText.textContent); notify("已复制"); } };
   liveTranslate.onclick = async () => { const id = liveTranslate.dataset.messageId; if (!id) return; if (liveTranslate.classList.contains("active")) { assistantSubtitleText.textContent = liveTranslate.dataset.originalContent; liveTranslate.classList.remove("active"); return; } liveTranslate.disabled = true; try { assistantSubtitleText.textContent = await streamVoiceTranslation(state.active.id, Number(id), (partial) => { assistantSubtitleText.textContent = partial; }); liveTranslate.classList.add("active"); } catch (error) { notify(error.message); } finally { liveTranslate.disabled = false; } };
+  withdrawTurnButton.onclick = async () => {
+    const turnId = withdrawableTurnId;
+    if (!turnId || withdrawnTurnIds.has(turnId)) return;
+    withdrawnTurnIds.add(turnId);
+    withdrawTurnButton.disabled = true;
+    state.conversation?.withdrawTurn?.(turnId);
+    userSubtitleText.textContent = "";
+    assistantSubtitleText.textContent = "";
+    withdrawTurnButton.classList.add("hidden");
+    liveTranslate.removeAttribute("data-message-id");
+    liveTranslate.classList.remove("active");
+    try {
+      await saveQueue;
+      const result = await api(
+        `/api/characters/${state.active.id}/voice-conversations/${voiceConversation.id}/turns/${encodeURIComponent(turnId)}`,
+        { method: "DELETE" },
+      );
+      const deletedIds = new Set(result.deletedIds || []);
+      state.voiceMessages = state.voiceMessages.filter((message) => !deletedIds.has(message.id));
+      turnMessageIds.delete(turnId);
+      pendingUsage.delete(turnId);
+      Object.assign(state.activeVoiceConversation, result.conversation);
+      withdrawableTurnId = "";
+    } catch (error) {
+      withdrawnTurnIds.delete(turnId);
+      withdrawableTurnId = turnId;
+      withdrawTurnButton.classList.remove("hidden");
+      notify(error.message);
+    } finally {
+      withdrawTurnButton.disabled = false;
+    }
+  };
 
   const updateVolume = () => {
     if (cancelled || !state.conversation) return;
@@ -941,25 +980,41 @@ async function startPhone() {
       onTranscript: (data) => {
         userSubtitleText.textContent = data.text || "";
         userSubtitle.classList.toggle("interim", Boolean(data.interim));
+        withdrawTurnButton.classList.add("hidden");
         if (!data.interim && data.text) assistantSubtitleText.textContent = "";
         setMode("listening");
       },
       onTurnComplete: async (turn) => {
+        if (withdrawnTurnIds.has(turn.turnId)) return;
+        if (turn.role === "user" && turn.turnId) {
+          withdrawableTurnId = turn.turnId;
+          withdrawTurnButton.classList.remove("hidden");
+        }
         saveQueue = saveQueue.then(async () => {
+          if (withdrawnTurnIds.has(turn.turnId)) return;
           const saved = await saveVoiceTurn(turn);
-          if (saved) turnMessageIds[saved.role] = saved.id;
+          const messageIds = turnMessageIds.get(turn.turnId) || {};
+          if (saved) messageIds[saved.role] = saved.id;
+          turnMessageIds.set(turn.turnId, messageIds);
           if (saved?.role === "assistant") {
             liveTranslate.dataset.messageId = saved.id;
             liveTranslate.dataset.originalContent = saved.content;
             liveTranslate.classList.remove("active");
-            await saveTurnUsage();
+            await saveTurnUsage(turn.turnId);
           }
         }).catch((error) => notify(error.message));
         await saveQueue;
       },
-      onUsage: async (usage) => {
-        pendingUsage = usage;
-        saveQueue = saveQueue.then(saveTurnUsage).catch((error) => notify(error.message));
+      onSpeechStart: () => {
+        withdrawableTurnId = "";
+        withdrawTurnButton.classList.add("hidden");
+      },
+      onUsage: async (usage, metadata) => {
+        if (!metadata.turnId || withdrawnTurnIds.has(metadata.turnId)) return;
+        pendingUsage.set(metadata.turnId, usage);
+        saveQueue = saveQueue
+          .then(() => saveTurnUsage(metadata.turnId))
+          .catch((error) => notify(error.message));
         await saveQueue;
       },
       onPlaybackChange: (playing) => setMode(playing ? "speaking" : "listening"),

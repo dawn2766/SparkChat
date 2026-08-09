@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from .realtime_protocol import (
     AUDIO_ONLY_REQUEST,
     AUDIO_ONLY_RESPONSE,
+    CONVERSATION_DELETE,
     FINISH_CONNECTION,
     FINISH_SESSION,
     START_CONNECTION,
@@ -59,7 +60,7 @@ def session_payload(config):
     payload = {
         "asr": {
             "audio_info": {"format": "pcm", "sample_rate": 16000, "channel": 1},
-            "extra": {"end_smooth_window_ms": 800},
+            "extra": {"end_smooth_window_ms": 1500},
         },
         "tts": {
             "speaker": speaker_id,
@@ -135,8 +136,16 @@ async def handle_browser(browser):
                         await upstream.send(encode_event(
                             TASK_REQUEST, message, session_id, message_type=AUDIO_ONLY_REQUEST
                         ))
-                    elif json.loads(message).get("type") == "finish":
-                        break
+                    else:
+                        command = json.loads(message)
+                        if command.get("type") == "finish":
+                            break
+                        if command.get("type") == "withdraw" and command.get("turnId"):
+                            await upstream.send(encode_event(
+                                CONVERSATION_DELETE,
+                                {"items": [{"item_id": str(command["turnId"])}]},
+                                session_id,
+                            ))
             finally:
                 upstream_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

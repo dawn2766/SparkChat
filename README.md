@@ -146,6 +146,9 @@ location /sparkchat/realtime {
 - 聊天朗读：`POST /api/characters/:id/speak` 调用豆包 V3 HTTP Chunked TTS。
 - 聊天听写：浏览器上传 16 kHz PCM，经实时代理读取 `451 ASRResponse`。
 - 实时通话：代理连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`；`ICL_uranus_...` ICL V3 音色使用 O2.0 `2.1.0.0`，SC2.0 音色使用 `2.2.0.0`，输入 16 kHz PCM，输出 24 kHz PCM。
+- 用户字幕：当前旧版 S2S 接口实际返回的 `451 ASRResponse.results[].text` 是当前话轮的累计识别快照；每个新快照替换上一版字幕，只有 `459 ASREnded` 到达时的最后快照会保存为用户消息。角色侧 `550 ChatResponse.content` 仍按流式增量拼接。
+- 麦克风输入：浏览器显式请求单声道、回声消除、降噪和自动增益，采集结果重采样为 16 kHz、int16 小端 PCM，并按官方推荐的 20 ms（640 字节）分包持续上传。服务端使用 `keep_alive` 模式和官方默认 1500 ms 判停窗口，不在客户端设置音量阈值或丢弃小声 PCM。
+- 回合与撤回：实时事件的 `question_id` 作为本地回合 ID，同一角色的完成事件重放不会重复入库。用户输入完成后可撤回最近一轮；客户端立即停止残留播报，并通过官方 `ConversationDelete` 事件与本地原子删除同步移除该轮用户输入、角色回复和后续上下文。
 
 ## 验证
 

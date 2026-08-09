@@ -56,8 +56,12 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let assistantQuestionId = "";
   let assistantReplyId = "";
   let userTurnText = "";
+  let userQuestionId = "";
   let interruptedQuestionId = "";
   let playbackInterrupted = false;
+  const completedUserTurns = new Set();
+  const completedAssistantTurns = new Set();
+  const withdrawnTurns = new Set();
   const playbackNodes = new Set();
 
   const interruptPlayback = () => {
@@ -129,34 +133,46 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         return;
       }
       if (message.event === 154 && data.usage) {
-        handlers.onUsage?.(data.usage);
+        handlers.onUsage?.(data.usage, {
+          turnId: String(data.question_id || assistantQuestionId || userQuestionId || ""),
+        });
       }
       if (message.event === 450) {
-        interruptedQuestionId = String(data.question_id || "");
+        userQuestionId = String(data.question_id || userQuestionId);
+        interruptedQuestionId = userQuestionId;
         playbackInterrupted = true;
         interruptPlayback();
+        handlers.onSpeechStart?.({ turnId: userQuestionId });
       }
       if (message.event === 451) {
         (data.results || []).forEach((result) => {
-          if (String(result.text || "").trim() && !playbackInterrupted) {
+          const transcript = String(result.text || "");
+          if (transcript.trim() && !playbackInterrupted) {
             playbackInterrupted = true;
             interruptPlayback();
           }
-          userTurnText = mergeRealtimeText(userTurnText, result.text);
-          handlers.onTranscript?.({ text: result.text, interim: result.is_interim });
+          userTurnText = transcript;
+          handlers.onTranscript?.({
+            text: userTurnText,
+            interim: result.is_interim,
+            turnId: userQuestionId,
+          });
         });
       }
       if (message.event === 459) {
-        if (userTurnText.trim()) {
-          handlers.onTurnComplete?.({ role: "user", content: userTurnText.trim() });
-          userTurnText = "";
+        const content = userTurnText.trim();
+        if (content && (!userQuestionId || !completedUserTurns.has(userQuestionId))) {
+          if (userQuestionId) completedUserTurns.add(userQuestionId);
+          handlers.onTurnComplete?.({ role: "user", content, turnId: userQuestionId });
         }
+        userTurnText = "";
         playbackInterrupted = false;
         interruptedQuestionId = "";
       }
       if (message.event === 350 || message.event === 550) {
         const questionId = String(data.question_id || "");
         const replyId = String(data.reply_id || "");
+        if (questionId && withdrawnTurns.has(questionId)) return;
         const startsNewReply = (questionId && questionId !== assistantQuestionId)
           || (replyId && replyId !== assistantReplyId);
         if (startsNewReply) {
@@ -186,7 +202,20 @@ export async function createRealtimeSession(character, handlers = {}, options = 
       }
       if (message.event === 559) {
         const content = (assistantChatText || assistantSpokenText).trim();
-        if (content) handlers.onTurnComplete?.({ role: "assistant", content });
+        const questionId = String(data.question_id || assistantQuestionId || "");
+        if (questionId && withdrawnTurns.has(questionId)) {
+          socket.send(JSON.stringify({ type: "withdraw", turnId: questionId }));
+          return;
+        }
+        if (content && (!questionId || !completedAssistantTurns.has(questionId))) {
+          if (questionId) completedAssistantTurns.add(questionId);
+          handlers.onTurnComplete?.({
+            role: "assistant",
+            content,
+            turnId: questionId,
+            replyId: String(data.reply_id || assistantReplyId || ""),
+          });
+        }
       }
       if (message.event === 150) handlers.onReady?.();
     }
@@ -210,7 +239,14 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     if (closed) throw Error("语音会话已结束");
     if (!navigator.mediaDevices?.getUserMedia) throw Error("当前浏览器不支持麦克风输入");
     await audioContext.resume();
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: { ideal: 1 },
+        echoCancellation: { ideal: true },
+        noiseSuppression: { ideal: true },
+        autoGainControl: { ideal: true },
+      },
+    });
     source = audioContext.createMediaStreamSource(mediaStream);
     processor = audioContext.createScriptProcessor(1024, 1, 1);
     let pendingSamples = new Float32Array(0);
@@ -236,5 +272,22 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     silentGain.connect(audioContext.destination);
   };
 
-  return { beginMicrophone, stop, mute: (muted) => mediaStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; }) };
+  const withdrawTurn = (turnId) => {
+    const normalizedTurnId = String(turnId || "");
+    if (!normalizedTurnId || closed || socket.readyState !== WebSocket.OPEN) return false;
+    withdrawnTurns.add(normalizedTurnId);
+    playbackInterrupted = true;
+    assistantChatText = "";
+    assistantSpokenText = "";
+    interruptPlayback();
+    socket.send(JSON.stringify({ type: "withdraw", turnId: normalizedTurnId }));
+    return true;
+  };
+
+  return {
+    beginMicrophone,
+    stop,
+    withdrawTurn,
+    mute: (muted) => mediaStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; }),
+  };
 }

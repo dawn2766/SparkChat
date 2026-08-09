@@ -1084,9 +1084,15 @@ class SparkChatApiTest(unittest.TestCase):
         for role, content in (("user", "语音里的问题"), ("assistant", "语音里的回答")):
             response = self.client.post(
                 f"/api/characters/1/voice-conversations/{first_id}/messages",
-                json={"role": role, "content": content},
+                json={"role": role, "content": content, "turnId": "voice-turn-1"},
             )
             self.assertEqual(response.status_code, 201)
+        duplicate = self.client.post(
+            f"/api/characters/1/voice-conversations/{first_id}/messages",
+            json={"role": "user", "content": "语音里的问题", "turnId": "voice-turn-1"},
+        )
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertTrue(duplicate.json["duplicate"])
         self.client.post(
             f"/api/characters/1/voice-conversations/{second_id}/messages",
             json={"role": "user", "content": "最近语音通话"},
@@ -1142,8 +1148,27 @@ class SparkChatApiTest(unittest.TestCase):
             )
             self.assertEqual(token.status_code, 200)
             self.assertEqual(token.json["voiceConversationId"], first_id)
-            self.assertIn("语音里的问题", token.json["instructions"])
-            self.assertIn("语音里的回答", token.json["instructions"])
+            self.assertEqual(token.json["instructions"].count("语音里的问题"), 1)
+            self.assertEqual(token.json["instructions"].count("语音里的回答"), 1)
+
+            withdrawn = self.client.delete(
+                f"/api/characters/1/voice-conversations/{first_id}/turns/voice-turn-1"
+            )
+            self.assertEqual(withdrawn.status_code, 200)
+            self.assertEqual(len(withdrawn.json["deletedIds"]), 2)
+            after_withdrawal = self.client.get(
+                f"/api/characters/1/voice-conversations/{first_id}/messages"
+            )
+            self.assertEqual(after_withdrawal.json["messages"], [])
+            context_after_withdrawal = self.client.get(
+                f"/api/token?characterId=1&voiceConversationId={first_id}"
+            )
+            self.assertNotIn(
+                "语音里的问题", context_after_withdrawal.json["instructions"]
+            )
+            self.assertNotIn(
+                "语音里的回答", context_after_withdrawal.json["instructions"]
+            )
         finally:
             token_server.doubao_speech = original_client
 

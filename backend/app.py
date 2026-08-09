@@ -362,6 +362,8 @@ def init_db():
             conversation_id INTEGER NOT NULL,
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
+            turn_id TEXT,
+            reply_id TEXT,
             token_count INTEGER,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -540,6 +542,17 @@ def init_db():
     }
     if "token_count" not in voice_message_columns:
         database.execute("ALTER TABLE voice_messages ADD COLUMN token_count INTEGER")
+    if "turn_id" not in voice_message_columns:
+        database.execute("ALTER TABLE voice_messages ADD COLUMN turn_id TEXT")
+    if "reply_id" not in voice_message_columns:
+        database.execute("ALTER TABLE voice_messages ADD COLUMN reply_id TEXT")
+    database.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_messages_turn_role
+        ON voice_messages(conversation_id, turn_id, role)
+        WHERE turn_id IS NOT NULL
+        """
+    )
     for row in database.execute(
         "SELECT id, content FROM voice_messages WHERE token_count IS NULL"
     ).fetchall():
@@ -1483,7 +1496,7 @@ def list_voice_messages(character_id, conversation_id):
     if get_voice_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该语音通话"), 404
     rows = get_db().execute(
-        "SELECT id, role, content, token_count, created_at FROM voice_messages WHERE conversation_id = ? ORDER BY id",
+        "SELECT id, role, content, turn_id, reply_id, token_count, created_at FROM voice_messages WHERE conversation_id = ? ORDER BY id",
         (conversation_id,),
     ).fetchall()
     return jsonify(messages=[dict(row) for row in rows])
@@ -1500,16 +1513,38 @@ def create_voice_message(character_id, conversation_id):
     payload = request.get_json(silent=True) or {}
     role = str(payload.get("role", "")).strip()
     content = str(payload.get("content", "")).strip()
-    if role not in {"user", "assistant"} or not content or len(content) > 12000:
+    turn_id = str(payload.get("turnId", "")).strip() or None
+    reply_id = str(payload.get("replyId", "")).strip() or None
+    if (
+        role not in {"user", "assistant"}
+        or not content
+        or len(content) > 12000
+        or (turn_id and len(turn_id) > 200)
+        or (reply_id and len(reply_id) > 200)
+    ):
         return jsonify(error="语音消息内容无效"), 400
+    if turn_id:
+        existing = get_db().execute(
+            """
+            SELECT id, role, content, turn_id, reply_id, token_count, created_at
+            FROM voice_messages
+            WHERE conversation_id = ? AND turn_id = ? AND role = ?
+            """,
+            (conversation_id, turn_id, role),
+        ).fetchone()
+        if existing is not None:
+            return jsonify(message=dict(existing), duplicate=True)
     cursor = get_db().execute(
         """
-        INSERT INTO voice_messages (user_id, character_id, conversation_id, role, content, token_count)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO voice_messages (
+            user_id, character_id, conversation_id, role, content,
+            turn_id, reply_id, token_count
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             session["user_id"], character_id, conversation_id,
-            role, content, fallback_token_count(content),
+            role, content, turn_id, reply_id, fallback_token_count(content),
         ),
     )
     if role == "user" and not conversation["title_custom"]:
@@ -1530,10 +1565,88 @@ def create_voice_message(character_id, conversation_id):
     if role == "assistant":
         schedule_voice_memory_update(conversation_id)
     row = get_db().execute(
-        "SELECT id, role, content, token_count, created_at FROM voice_messages WHERE id = ?",
+        "SELECT id, role, content, turn_id, reply_id, token_count, created_at FROM voice_messages WHERE id = ?",
         (cursor.lastrowid,),
     ).fetchone()
     return jsonify(message=dict(row)), 201
+
+
+@app.delete("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/turns/<turn_id>")
+@login_required
+def delete_voice_turn(character_id, conversation_id, turn_id):
+    if get_character(character_id) is None:
+        return jsonify(error="未找到该角色"), 404
+    conversation = get_voice_conversation(character_id, conversation_id)
+    if conversation is None:
+        return jsonify(error="未找到该语音通话"), 404
+    rows = get_db().execute(
+        """
+        SELECT id FROM voice_messages
+        WHERE conversation_id = ? AND user_id = ? AND character_id = ? AND turn_id = ?
+        ORDER BY id
+        """,
+        (conversation_id, session["user_id"], character_id, turn_id),
+    ).fetchall()
+    if not rows:
+        return jsonify(
+            ok=True,
+            deletedIds=[],
+            conversation=serialize_conversation(conversation),
+        )
+    latest_turn = get_db().execute(
+        """
+        SELECT turn_id FROM voice_messages
+        WHERE conversation_id = ? AND turn_id IS NOT NULL
+        ORDER BY id DESC LIMIT 1
+        """,
+        (conversation_id,),
+    ).fetchone()
+    if latest_turn is None or latest_turn["turn_id"] != turn_id:
+        return jsonify(error="只能撤回最近一轮语音对话"), 409
+    covered = get_db().execute(
+        """
+        SELECT MAX(
+            covered_through_message_id,
+            covered_through_message_id_zh,
+            covered_through_message_id_en
+        ) AS message_id
+        FROM voice_conversation_memories WHERE conversation_id = ?
+        """,
+        (conversation_id,),
+    ).fetchone()
+    if covered and covered["message_id"] and rows[0]["id"] <= covered["message_id"]:
+        return jsonify(error="该轮语音对话已进入长期记忆，无法撤回"), 409
+    deleted_ids = [row["id"] for row in rows]
+    get_db().execute(
+        "DELETE FROM voice_messages WHERE conversation_id = ? AND turn_id = ?",
+        (conversation_id, turn_id),
+    )
+    if not conversation["title_custom"]:
+        first_user = get_db().execute(
+            """
+            SELECT content FROM voice_messages
+            WHERE conversation_id = ? AND role = 'user'
+            ORDER BY id LIMIT 1
+            """,
+            (conversation_id,),
+        ).fetchone()
+        get_db().execute(
+            "UPDATE voice_conversations SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            ((first_user["content"][:80] if first_user else "新通话"), conversation_id),
+        )
+    else:
+        get_db().execute(
+            "UPDATE voice_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (conversation_id,),
+        )
+    get_db().commit()
+    return jsonify(
+        ok=True,
+        deletedIds=deleted_ids,
+        conversation=serialize_conversation(
+            get_voice_conversation(character_id, conversation_id)
+        ),
+    )
 
 
 @app.post("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/usage")
