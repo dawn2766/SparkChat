@@ -461,7 +461,7 @@
 
 .contact-time {
   color: var(--faint);
-  font: 9px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
 }
 
 .contact-preview {

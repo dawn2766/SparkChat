@@ -106,6 +106,10 @@ STAGE_DIRECTION_PROMPTS = {
     "zh": "可选表现：只在动作、表情、停顿或声线变化确实外化了当下情绪时，偶尔在句首用简短的中文全角括号写出，例如“（他看了你一会儿，语气缓下来）”。它不是每轮必需，也不是营造人设的装饰。放在对话自然发生的位置；不要连续堆叠，不要描写对方看不见的内心独白，不要凭空创造场景、身体接触或现实行动，也不要用它代替真正要说的话。",
     "en": "Optional expression: Only when an action, expression, pause, or vocal shift genuinely reveals the present emotion, you may occasionally render it at the beginning of a sentence in a brief English half-width parenthetical, such as \"(He studies you for a moment, then softens.)\" It is neither required each turn nor decoration for displaying the persona. Place it where it naturally occurs in the exchange. Do not stack directions, narrate inaccessible inner thoughts, invent settings, physical contact, or real-world actions, or use a direction in place of what needs to be said.",
 }
+REALTIME_SPEAKING_STYLE_PROMPTS = {
+    "zh": "说话方式：回答时使用自然、符合当前语境的声音语气，不要浮夸、做作或刻意表演。",
+    "en": "Speaking style: Answer in a natural speaking voice that fits the current context; avoid exaggerated, affected, or deliberately performative delivery.",
+}
 SYSTEM_PROMPTS = {
     language: f"{prompt}\n{STAGE_DIRECTION_PROMPTS[language]}"
     for language, prompt in CORE_SYSTEM_PROMPTS.items()
@@ -240,7 +244,7 @@ def build_agent_instructions(character, include_stage_directions=True):
 def realtime_character_config(character):
     language = normalize_prompt_language(character["language"])
     return {
-        "instructions": build_agent_instructions(character),
+        "instructions": f"{build_agent_instructions(character)}\n\n{REALTIME_SPEAKING_STYLE_PROMPTS[language]}",
         "language": language,
     }
 

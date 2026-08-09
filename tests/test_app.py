@@ -686,7 +686,7 @@ class SparkChatApiTest(unittest.TestCase):
 
     def test_agent_instructions_accept_sqlite_rows(self):
         import sqlite3
-        from backend.app import build_agent_instructions
+        from backend.app import build_agent_instructions, language_constraint
 
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
@@ -699,7 +699,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("Character name: 测试角色", instructions)
         self.assertIn("Identity and background: 身份设定", instructions)
         self.assertIn("Response requirements:", instructions)
-        self.assertIn("Every audible reply and every live transcript must be entirely in English", instructions)
+        self.assertTrue(instructions.startswith(language_constraint("en")))
         self.assertIn("regardless of the user's language", instructions)
 
     def test_session_cookie_survives_new_client(self):
@@ -831,9 +831,14 @@ class SparkChatApiTest(unittest.TestCase):
         )
         self.assertNotIn("speaking_style", payload["dialog"])
 
-    def test_realtime_session_uses_same_final_instructions_as_text_chat(self):
+    def test_realtime_session_adds_language_specific_speaking_style(self):
         from backend.realtime_server import session_payload
-        from backend.app import build_agent_instructions, language_constraint, realtime_character_config
+        from backend.app import (
+            REALTIME_SPEAKING_STYLE_PROMPTS,
+            build_agent_instructions,
+            language_constraint,
+            realtime_character_config,
+        )
 
         character = {
             "name": "Megatron",
@@ -843,17 +848,19 @@ class SparkChatApiTest(unittest.TestCase):
         }
         config = realtime_character_config(character)
         payload = session_payload({"speakerId": "S_test_voice", **config})
+        text_instructions = build_agent_instructions(character)
 
-        self.assertEqual(
-            config["instructions"],
-            build_agent_instructions(character),
-        )
+        self.assertTrue(config["instructions"].startswith(f"{text_instructions}\n\n"))
+        self.assertTrue(config["instructions"].endswith(REALTIME_SPEAKING_STYLE_PROMPTS["en"]))
+        self.assertNotIn("Speaking style:", text_instructions)
         self.assertEqual(config["language"], "en")
         self.assertIn(config["instructions"], payload["dialog"]["character_manifest"])
         self.assertIn("Character name: Megatron", config["instructions"])
         self.assertIn("Identity and background: Identity", config["instructions"])
         self.assertNotIn("角色名称", config["instructions"])
-        self.assertNotIn("说话方式", payload["dialog"]["character_manifest"])
+        self.assertIn("natural, clear, and fluent speaking voice", payload["dialog"]["character_manifest"])
+        self.assertIn("fits the current context", payload["dialog"]["character_manifest"])
+        self.assertIn("avoid exaggerated, affected, or deliberately performative delivery", payload["dialog"]["character_manifest"])
         self.assertEqual(payload["dialog"]["character_manifest"].count(language_constraint("en")), 1)
         self.assertIn("Optional expression", payload["dialog"]["character_manifest"])
         self.assertIn("English half-width parenthetical", payload["dialog"]["character_manifest"])
@@ -884,6 +891,10 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("可选表现", realtime_config["instructions"])
         self.assertIn("中文全角括号", realtime_config["instructions"])
         self.assertIn("放在对话自然发生的位置", realtime_config["instructions"])
+        self.assertIn("说话方式：", realtime_config["instructions"])
+        self.assertIn("自然、清晰、流畅且符合当前语境", realtime_config["instructions"])
+        self.assertIn("不要浮夸、做作或刻意表演", realtime_config["instructions"])
+        self.assertNotIn("说话方式：", text_instructions)
         self.assertIn("绝不因为对话者使用英文而改用英文", realtime_config["instructions"])
 
         other_character = {**character, "name": "另一个角色", "persona": "活泼、坦率。", "language": "en"}
@@ -900,7 +911,7 @@ class SparkChatApiTest(unittest.TestCase):
         self.assertIn("角色名称: 测试角色", fallback_config["instructions"])
         self.assertIn("身份背景: 沉着、可靠。", fallback_config["instructions"])
         self.assertIn("回答要求：", fallback_config["instructions"])
-        self.assertNotIn("说话方式", fallback_payload["dialog"]["character_manifest"])
+        self.assertIn("说话方式：", fallback_payload["dialog"]["character_manifest"])
 
     def test_character_model_is_used_for_text_generation(self):
         from backend import app as token_server
