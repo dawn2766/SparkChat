@@ -320,6 +320,7 @@
 #create-form > .form-actions {
   padding: 11px 16px calc(11px + env(safe-area-inset-bottom));
   border-top: 0;
+  background: transparent;
 }
 
 .dialog-actions.character-form-actions,
@@ -1397,7 +1398,7 @@
 }
 
 .phone-overlay {
-  position: fixed;
+  position: absolute;
   z-index: 20;
   inset: 0;
   display: flex;
@@ -1499,6 +1500,7 @@
   width: 100px;
   height: 100px;
   margin: 0 auto;
+  background: transparent;
   font-size: 23px;
   box-shadow: 0 0 0 10px rgb(216 243 93 / 5%);
   z-index: 1;
@@ -1629,23 +1631,6 @@
 .assistant-subtitle .phone-subtitle-title { color: var(--accent); }
 .user-subtitle.interim { opacity: .65; }
 
-.withdraw-voice-turn {
-  min-height: 28px;
-  align-self: flex-end;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 7px;
-  padding: 3px 7px;
-  color: var(--muted);
-  background: transparent;
-  font: 500 12px var(--font-ui);
-}
-
-.withdraw-voice-turn:hover { color: var(--ink); }
-.withdraw-voice-turn:disabled { opacity: .45; }
-.withdraw-voice-turn svg { width: 14px; height: 14px; }
-
 .phone-live-actions {
   min-height: 22px;
   display: flex;
@@ -1663,7 +1648,7 @@
   width: min(100%, 580px);
   height: 100dvh;
   min-height: 0;
-  position: fixed;
+  position: absolute;
   z-index: 22;
   inset: 0;
   display: flex;

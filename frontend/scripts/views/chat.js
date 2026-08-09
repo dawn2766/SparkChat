@@ -754,7 +754,7 @@ async function renderVoiceRecordPage(conversation, dialog) {
   const page = document.createElement("section");
   page.className = "voice-history-page";
   page.innerHTML = `<header class="page-heading"><button class="icon-button voice-history-back" type="button" aria-label="返回历史通话"><i data-lucide="arrow-left"></i></button><h1>和${esc(state.active.name)}的语音通话历史</h1></header><div class="messages scroll-container" id="voice-history-messages">${state.voiceMessages.map(voiceMessageMarkup).join("") || '<div class="history-empty">暂无通话记录</div>'}</div>`;
-  document.body.append(page);
+  app.append(page);
   dialog.close();
   refreshIcons();
   page.querySelector(".voice-history-back").onclick = () => { page.remove(); dialog.showModal(); };
@@ -863,8 +863,8 @@ async function startPhone() {
   if (callButton) callButton.disabled = false;
   const phone = document.createElement("div");
   phone.className = "phone-overlay connecting";
-  phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle-stack"><div class="phone-subtitle user-subtitle" id="user-subtitle"><span class="phone-subtitle-title">用户</span><span class="phone-subtitle-text"></span><button class="withdraw-voice-turn hidden" type="button" aria-label="撤回本轮语音输入"><i data-lucide="undo-2"></i><span>撤回</span></button></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"><span class="phone-subtitle-title">角色</span><span class="phone-subtitle-text"></span></div></div><div class="phone-live-actions"><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
-  document.body.append(phone);
+  phone.innerHTML = `<header class="phone-header"><button class="icon-button phone-history-button" id="phone-history" aria-label="历史通话"><i data-lucide="clock-3"></i></button></header><main class="phone-stage"><div class="voice-orbit"><div class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${avatar(state.active)}</div><h1>${esc(state.active.name)}</h1><div class="phone-status" id="phone-status"><span class="status-signal"></span><span id="phone-status-text">正在连接</span></div><div class="phone-subtitles"><div class="phone-subtitle-stack"><div class="phone-subtitle user-subtitle" id="user-subtitle"><span class="phone-subtitle-title">用户</span><span class="phone-subtitle-text"></span></div><div class="phone-subtitle assistant-subtitle" id="assistant-subtitle"><span class="phone-subtitle-title">角色</span><span class="phone-subtitle-text"></span></div></div><div class="phone-live-actions"><button class="message-action withdraw-voice-turn" type="button" aria-label="撤回本轮语音输入"><i data-lucide="undo-2"></i></button><button class="message-action" data-live-copy aria-label="复制当前语音回复"><i data-lucide="copy"></i></button><button class="message-action" data-live-translate aria-label="翻译当前语音回复"><i data-lucide="languages"></i></button></div></div></main><footer class="phone-controls"><button class="call-control mic-control" id="toggle-mic" aria-label="关闭麦克风" disabled><i data-lucide="mic"></i></button><button class="call-control end-call" id="end-call" aria-label="挂断"><i data-lucide="phone-off"></i></button></footer>${voiceHistoryDialogMarkup()}`;
+  app.append(phone);
   refreshIcons();
   const statusText = phone.querySelector("#phone-status-text");
   const userSubtitle = phone.querySelector("#user-subtitle");
@@ -922,7 +922,6 @@ async function startPhone() {
     state.conversation?.withdrawTurn?.(turnId);
     userSubtitleText.textContent = "";
     assistantSubtitleText.textContent = "";
-    withdrawTurnButton.classList.add("hidden");
     liveTranslate.removeAttribute("data-message-id");
     liveTranslate.classList.remove("active");
     try {
@@ -940,7 +939,6 @@ async function startPhone() {
     } catch (error) {
       withdrawnTurnIds.delete(turnId);
       withdrawableTurnId = turnId;
-      withdrawTurnButton.classList.remove("hidden");
       notify(error.message);
     } finally {
       withdrawTurnButton.disabled = false;
@@ -980,7 +978,6 @@ async function startPhone() {
       onTranscript: (data) => {
         userSubtitleText.textContent = data.text || "";
         userSubtitle.classList.toggle("interim", Boolean(data.interim));
-        withdrawTurnButton.classList.add("hidden");
         if (!data.interim && data.text) assistantSubtitleText.textContent = "";
         setMode("listening");
       },
@@ -988,7 +985,6 @@ async function startPhone() {
         if (withdrawnTurnIds.has(turn.turnId)) return;
         if (turn.role === "user" && turn.turnId) {
           withdrawableTurnId = turn.turnId;
-          withdrawTurnButton.classList.remove("hidden");
         }
         saveQueue = saveQueue.then(async () => {
           if (withdrawnTurnIds.has(turn.turnId)) return;
@@ -1007,7 +1003,6 @@ async function startPhone() {
       },
       onSpeechStart: () => {
         withdrawableTurnId = "";
-        withdrawTurnButton.classList.add("hidden");
       },
       onUsage: async (usage, metadata) => {
         if (!metadata.turnId || withdrawnTurnIds.has(metadata.turnId)) return;
