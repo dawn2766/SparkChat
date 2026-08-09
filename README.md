@@ -137,7 +137,7 @@ location /sparkchat/realtime {
 }
 ```
 
-生产环境应设置 `COOKIE_SECURE=true`，并保持 `FLASK_SECRET_KEY` 稳定。访问 <https://visionvoice.cn/sparkchat/> 进行真实验收。
+生产环境应设置 `COOKIE_SECURE=true`，并保持 `FLASK_SECRET_KEY` 稳定。访问 <https://caralin.love/sparkchat/> 进行真实验收。
 
 ## 语音链路
 

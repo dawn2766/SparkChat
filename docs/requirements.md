@@ -150,7 +150,7 @@ Get-Content frontend/service-worker.js | node --input-type=module --check
 - TTS：确认豆包 Chunked 音频可播放；未授权、额度不足和音色错误返回可理解的 `503`；一般上游错误返回 `502`；带 `actionUrl` 的错误可定位到豆包控制台。
 - 语音输入：确认 16 kHz PCM 发送、ASR 字幕合并和不自动发送。
 - 实时通话：确认按音色前缀选择正确模型版本、WebSocket 建连、ASR 字幕、TTS 播放、静音和挂断。
-- 公网环境：部署后访问 `https://visionvoice.cn/sparkchat/`，分别检查网页、API、TTS 和实时语音，并记录响应头 `X-Tt-Logid`。
+- 公网环境：部署后访问 `https://caralin.love/sparkchat/`，分别检查网页、API、TTS 和实时语音，并记录响应头 `X-Tt-Logid`。
 
 ## 10. 部署配置
 
