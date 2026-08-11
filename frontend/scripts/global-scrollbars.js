@@ -1,11 +1,8 @@
 const TARGET_SELECTOR = [
-  ".scroll-container",
   ".markdown-table-scroll",
   ".markdown-body pre",
-  ".text-area",
-  ".select-menu",
-  ".phone-subtitle-text",
-  ".video-transcription-body",
+  ".character-prompt",
+  ".composer .text-area",
 ].join(",");
 const tracked = new WeakMap();
 const overlays = new Set();
@@ -18,9 +15,17 @@ const resizeObserver = new ResizeObserver((entries) => {
 });
 
 function hasOverflow(element, axis) {
+  if (axis === "y" && element.matches(".composer .text-area")) {
+    const maxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
+    if (!Number.isFinite(maxHeight) || element.clientHeight < maxHeight - 1) return false;
+  }
   return axis === "x"
     ? element.scrollWidth > element.clientWidth + 1
-    : element.scrollHeight > element.clientHeight + 1;
+    : element.scrollHeight > element.clientHeight + 2;
+}
+
+function trackInset(target, axis) {
+  return axis === "y" && target.matches("textarea") ? 8 : 0;
 }
 
 function clippingRect(target) {
@@ -57,9 +62,10 @@ function updateOverlay(overlay) {
   const rect = target.getBoundingClientRect();
   const clip = clippingRect(target);
   const horizontal = axis === "x";
+  const inset = trackInset(target, axis);
   const trackRect = horizontal
     ? { top: rect.bottom - 8, right: rect.right, bottom: rect.bottom, left: rect.left }
-    : { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.right - 8 };
+    : { top: rect.top + inset, right: rect.right, bottom: rect.bottom - inset, left: rect.right - 8 };
   if (
     trackRect.bottom <= clip.top || trackRect.top >= clip.bottom
     || trackRect.right <= clip.left || trackRect.left >= clip.right
@@ -70,7 +76,7 @@ function updateOverlay(overlay) {
   const viewport = horizontal ? target.clientWidth : target.clientHeight;
   const content = horizontal ? target.scrollWidth : target.scrollHeight;
   const scroll = horizontal ? target.scrollLeft : target.scrollTop;
-  const trackLength = horizontal ? rect.width : rect.height;
+  const trackLength = horizontal ? rect.width : Math.max(0, rect.height - inset * 2);
   const thumbLength = Math.max(28, viewport * trackLength / content);
   const available = Math.max(0, trackLength - thumbLength);
   const maxScroll = content - viewport;
@@ -78,9 +84,9 @@ function updateOverlay(overlay) {
 
   track.hidden = false;
   track.style.left = `${horizontal ? rect.left : rect.right - 8}px`;
-  track.style.top = `${horizontal ? rect.bottom - 8 : rect.top}px`;
+  track.style.top = `${horizontal ? rect.bottom - 8 : rect.top + inset}px`;
   track.style.width = `${horizontal ? rect.width : 8}px`;
-  track.style.height = `${horizontal ? 8 : rect.height}px`;
+  track.style.height = `${horizontal ? 8 : Math.max(0, rect.height - inset * 2)}px`;
   thumb.style.width = `${horizontal ? thumbLength : 4}px`;
   thumb.style.height = `${horizontal ? 4 : thumbLength}px`;
   thumb.style.transform = horizontal ? `translateX(${offset}px)` : `translateY(${offset}px)`;
