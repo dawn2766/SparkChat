@@ -1398,7 +1398,7 @@
 }
 
 .chat-view.keyboard-open .composer {
-  padding-bottom: 7px;
+  padding-bottom: 0;
 }
 
 .composer-edit-header {

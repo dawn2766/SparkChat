@@ -40,7 +40,9 @@ function loadVideo(file) {
     video.onloadedmetadata = () => resolve({ video, url });
     video.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(Error("无法读取视频参数，请确认文件没有损坏"));
+      const error = Error("浏览器无法读取视频参数");
+      error.code = "VIDEO_METADATA_UNAVAILABLE";
+      reject(error);
     };
   });
 }
@@ -93,7 +95,28 @@ export async function inspectVideo(file, { signal } = {}) {
   if (file.size > profile.sourceFileMaxBytes) {
     throw Error("原视频不能超过 2 GB");
   }
-  const { video, url } = await loadVideo(file);
+  let loadedVideo;
+  try {
+    loadedVideo = await loadVideo(file);
+  } catch (error) {
+    throwIfAborted(signal);
+    if (error.code !== "VIDEO_METADATA_UNAVAILABLE") throw error;
+    if (file.size > UPLOAD_FILE_MAX_BYTES) {
+      throw Error("浏览器无法读取该视频参数，且原视频超过 512 MB，无法直接上传；请先在系统相册中导出为兼容 MP4 或降低清晰度");
+    }
+    return {
+      width: 0,
+      height: 0,
+      duration: 0,
+      frameRate: 0,
+      size: file.size,
+      needsCompression: false,
+      compressionSupported: false,
+      inspectionUnavailable: true,
+      profile,
+    };
+  }
+  const { video, url } = loadedVideo;
   try {
     throwIfAborted(signal);
     const frameRate = await estimateFrameRate(video, signal);
