@@ -59,6 +59,11 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let userQuestionId = "";
   let interruptedQuestionId = "";
   let playbackInterrupted = false;
+  let capturingAssistantAudio = false;
+  let currentAssistantAudio = [];
+  let lastCompletedAssistantAudio = [];
+  let assistantTurnCompleted = false;
+  let replayingLastTurn = false;
   const completedUserTurns = new Set();
   const completedAssistantTurns = new Set();
   const withdrawnTurns = new Set();
@@ -73,6 +78,7 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     });
     playbackNodes.clear();
     nextPlaybackTime = audioContext.currentTime;
+    replayingLastTurn = false;
     handlers.onPlaybackChange?.(false);
   };
 
@@ -85,8 +91,12 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     }, remainingMs + 80);
   };
 
-  const playPcm = (arrayBuffer) => {
+  const playPcm = (arrayBuffer, replay = false) => {
     if (closed || playbackInterrupted || audioContext.state === "closed") return;
+    if (!replay && capturingAssistantAudio) {
+      currentAssistantAudio.push(arrayBuffer.slice(0));
+      if (assistantTurnCompleted) handlers.onTurnAudioAvailable?.();
+    }
     const pcm = new Int16Array(arrayBuffer);
     const buffer = audioContext.createBuffer(1, pcm.length, outputRate);
     const channel = buffer.getChannelData(0);
@@ -98,7 +108,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     node.onended = () => {
       playbackNodes.delete(node);
       node.disconnect();
-      if (!closed && playbackNodes.size === 0) handlers.onPlaybackChange?.(false);
+      if (!closed && playbackNodes.size === 0) {
+        replayingLastTurn = false;
+        handlers.onPlaybackChange?.(false);
+      }
     };
     nextPlaybackTime = Math.max(nextPlaybackTime, audioContext.currentTime);
     node.start(nextPlaybackTime);
@@ -142,6 +155,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         interruptedQuestionId = userQuestionId;
         playbackInterrupted = true;
         interruptPlayback();
+        capturingAssistantAudio = false;
+        currentAssistantAudio = [];
+        lastCompletedAssistantAudio = [];
+        assistantTurnCompleted = false;
         handlers.onSpeechStart?.({ turnId: userQuestionId });
       }
       if (message.event === 451) {
@@ -168,6 +185,9 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         userTurnText = "";
         playbackInterrupted = false;
         interruptedQuestionId = "";
+        capturingAssistantAudio = true;
+        currentAssistantAudio = [];
+        assistantTurnCompleted = false;
       }
       if (message.event === 350 || message.event === 550) {
         const questionId = String(data.question_id || "");
@@ -209,6 +229,8 @@ export async function createRealtimeSession(character, handlers = {}, options = 
         }
         if (content && (!questionId || !completedAssistantTurns.has(questionId))) {
           if (questionId) completedAssistantTurns.add(questionId);
+          lastCompletedAssistantAudio = currentAssistantAudio;
+          assistantTurnCompleted = true;
           handlers.onTurnComplete?.({
             role: "assistant",
             content,
@@ -279,6 +301,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     playbackInterrupted = true;
     assistantChatText = "";
     assistantSpokenText = "";
+    capturingAssistantAudio = false;
+    currentAssistantAudio = [];
+    lastCompletedAssistantAudio = [];
+    assistantTurnCompleted = false;
     interruptPlayback();
     socket.send(JSON.stringify({ type: "withdraw", turnId: normalizedTurnId }));
     return true;
@@ -288,6 +314,19 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     beginMicrophone,
     stop,
     withdrawTurn,
+    hasLastTurnAudio: () => lastCompletedAssistantAudio.length > 0,
+    toggleLastTurnPlayback: () => {
+      if (closed || !lastCompletedAssistantAudio.length) return false;
+      if (replayingLastTurn) {
+        interruptPlayback();
+        return false;
+      }
+      interruptPlayback();
+      playbackInterrupted = false;
+      replayingLastTurn = true;
+      lastCompletedAssistantAudio.forEach((chunk) => playPcm(chunk, true));
+      return true;
+    },
     mute: (muted) => mediaStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; }),
   };
 }

@@ -1364,7 +1364,8 @@
   background: transparent;
 }
 
-.message-action:disabled { opacity: .45; }
+.message-action:disabled,
+.speak-button:disabled { opacity: .45; }
 .message-action svg,
 .speak-button svg {
   width: 13px;

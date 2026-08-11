@@ -111,11 +111,13 @@ const subtitles = [];
 const transcripts = [];
 const completedTurns = [];
 let reportedUsage;
+let audioAvailableCount = 0;
 const session = await createRealtimeSession({ id: 1, name: "测试角色" }, {
   onText: (text) => subtitles.push(text),
   onTranscript: (data) => transcripts.push(data.text),
   onTurnComplete: (turn) => completedTurns.push(turn),
   onUsage: (usage) => { reportedUsage = usage; },
+  onTurnAudioAvailable: () => { audioAvailableCount += 1; },
 });
 const pcm = new Int16Array([1000, -1000]).buffer;
 
@@ -162,6 +164,8 @@ assert.deepEqual(completedTurns, [{
 }]);
 socket.emit(pcm);
 assert.equal(startedNodes.length, 1, "用户话轮结束后应立即播放新回复音频");
+assert.equal(session.hasLastTurnAudio(), false, "角色仍在响应时不应开放本轮回放");
+assert.equal(session.toggleLastTurnPlayback(), false, "角色仍在响应时点击回放不应打断实时回复");
 
 socket.emit(JSON.stringify({
   type: "event",
@@ -202,8 +206,13 @@ assert.deepEqual(completedTurns.at(-1), {
   replyId: "new-reply",
 });
 assert.equal(completedTurns.length, 2, "重复的回合结束事件不应重复保存消息");
+assert.equal(session.hasLastTurnAudio(), true, "角色话轮完成后应保留本轮音频");
+assert.equal(session.toggleLastTurnPlayback(), true, "角色话轮完成后应能回放本轮音频");
+assert.equal(startedNodes.length, 2, "回放应重新调度缓存的本轮音频");
+assert.equal(session.toggleLastTurnPlayback(), false, "回放过程中再次点击应停止播放");
 socket.emit(pcm);
-assert.equal(startedNodes.length, 2, "字幕事件晚到时不应影响后续音频播放");
+assert.equal(startedNodes.length, 3, "字幕事件晚到时不应影响后续音频播放");
+assert.equal(audioAvailableCount, 1, "完成事件后的尾部音频应通知界面刷新回放按钮");
 
 assert.equal(session.withdrawTurn("user-question"), true);
 assert.equal(
@@ -212,7 +221,8 @@ assert.equal(
   "撤回应通知代理删除同一上游回合",
 );
 socket.emit(pcm);
-assert.equal(startedNodes.length, 2, "撤回后不应继续播放该轮残留音频");
+assert.equal(startedNodes.length, 3, "撤回后不应继续播放该轮残留音频");
+assert.equal(session.hasLastTurnAudio(), false, "撤回后不应继续提供已撤回轮次的回放");
 socket.emit(JSON.stringify({
   type: "event",
   event: 559,
