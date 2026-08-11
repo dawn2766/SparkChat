@@ -1355,11 +1355,11 @@
 }
 
 .message-action {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 25px;
   display: inline-grid;
   place-items: center;
-  padding: 7px;
+  padding: 5px;
   color: var(--muted);
   background: transparent;
 }
@@ -1367,18 +1367,18 @@
 .message-action:disabled { opacity: .45; }
 .message-action svg,
 .speak-button svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   stroke-width: 2.2;
 }
 .message-action.active { color: var(--accent); }
 
 .speak-button {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 25px;
   display: inline-grid;
   place-items: center;
-  padding: 7px;
+  padding: 5px;
   color: var(--muted);
   background: transparent;
 }
