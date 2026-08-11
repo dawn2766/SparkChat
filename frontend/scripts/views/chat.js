@@ -69,15 +69,27 @@ function bindChatViewport() {
   const viewport = window.visualViewport;
   const composer = document.querySelector("#composer textarea");
   let layoutHeight = document.documentElement.clientHeight;
+  let visualHeight = viewport?.height || layoutHeight;
+  let bottomInset = Math.max(0, layoutHeight - (viewport?.offsetTop || 0) - visualHeight);
   let frame = 0;
   const syncHeight = () => {
     const currentLayoutHeight = document.documentElement.clientHeight;
+    const currentVisualHeight = viewport?.height || currentLayoutHeight;
     const focused = document.activeElement === composer;
-    if (!focused) layoutHeight = currentLayoutHeight;
+    if (!focused) {
+      layoutHeight = currentLayoutHeight;
+      visualHeight = currentVisualHeight;
+      bottomInset = Math.max(0, currentLayoutHeight - (viewport?.offsetTop || 0) - currentVisualHeight);
+    }
     const layoutResized = focused && layoutHeight - currentLayoutHeight > 120;
-    const height = layoutResized ? currentLayoutHeight : viewport?.height || currentLayoutHeight;
+    const visualResized = focused && visualHeight - currentVisualHeight > 120;
+    const keyboardOpen = layoutResized || visualResized;
     const offsetTop = layoutResized ? 0 : viewport?.offsetTop || 0;
-    const keyboardOpen = focused && (layoutResized || currentLayoutHeight - (viewport?.height || currentLayoutHeight) > 120);
+    const height = layoutResized
+      ? currentLayoutHeight
+      : keyboardOpen
+        ? Math.min(currentLayoutHeight - offsetTop, currentVisualHeight + bottomInset)
+        : currentVisualHeight;
     document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
     document.documentElement.style.setProperty("--chat-viewport-offset", `${offsetTop}px`);
     document.querySelector(".chat-view")?.classList.toggle("keyboard-open", keyboardOpen);
