@@ -63,11 +63,15 @@ function bindChatViewport() {
   viewportSyncController = new AbortController();
   const { signal } = viewportSyncController;
   const viewport = window.visualViewport;
+  const composer = document.querySelector("#composer textarea");
+  let stableHeight = viewport?.height || window.innerHeight;
   let frame = 0;
   const syncHeight = () => {
     const height = viewport?.height || window.innerHeight;
     const offsetTop = viewport?.offsetTop || 0;
-    const keyboardOpen = window.innerHeight - height > 150;
+    const focused = document.activeElement === composer;
+    if (!focused) stableHeight = Math.max(stableHeight, height);
+    const keyboardOpen = focused && Math.max(window.innerHeight - height, stableHeight - height) > 150;
     document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
     document.documentElement.style.setProperty("--chat-viewport-offset", `${offsetTop}px`);
     document.querySelector(".chat-view")?.classList.toggle("keyboard-open", keyboardOpen);
@@ -89,7 +93,6 @@ function bindChatViewport() {
   window.addEventListener("resize", syncHeight, { signal, passive: true });
   viewport?.addEventListener("resize", syncHeight, { signal, passive: true });
   viewport?.addEventListener("scroll", syncHeight, { signal, passive: true });
-  const composer = document.querySelector("#composer textarea");
   composer?.addEventListener("focus", () => trackHeight(), { signal });
   composer?.addEventListener("blur", syncAfterKeyboard, { signal });
   signal.addEventListener("abort", () => cancelAnimationFrame(frame), { once: true });
