@@ -1355,11 +1355,11 @@
 }
 
 .message-action {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: inline-grid;
   place-items: center;
-  padding: 8px;
+  padding: 7px;
   color: var(--muted);
   background: transparent;
 }
@@ -1374,11 +1374,11 @@
 .message-action.active { color: var(--accent); }
 
 .speak-button {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: inline-grid;
   place-items: center;
-  padding: 8px;
+  padding: 7px;
   color: var(--muted);
   background: transparent;
 }
@@ -1389,8 +1389,8 @@
 }
 
 .composer-button svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   stroke-width: 2.2;
 }
 
