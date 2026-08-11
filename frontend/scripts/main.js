@@ -3,6 +3,7 @@ import { bindCustomSelects } from "./custom-select.js";
 import { app } from "./dom.js";
 import { state } from "./state.js";
 import { renderAuth } from "./views/auth.js";
+import { initializeGlobalScrollbars } from "./global-scrollbars.js";
 
 const APP_HISTORY_KEY = "sparkchat";
 let currentRoute = { name: "auth" };
@@ -195,6 +196,7 @@ window.addEventListener("popstate", (event) => {
   routeTransition = routeTransition.then(() => renderRoute(route)).catch((error) => showAuth(error.message));
 });
 bindNavigationGestures();
+initializeGlobalScrollbars();
 boot();
 
 const SERVICE_WORKER_ENABLED = false;

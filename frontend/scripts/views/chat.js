@@ -32,9 +32,12 @@ function markdownMarkup(content) {
     link.rel = "noopener noreferrer";
   });
   template.content.querySelectorAll("table").forEach((table) => {
+    const container = document.createElement("div");
+    container.className = "markdown-table-container";
     const scroller = document.createElement("div");
     scroller.className = "markdown-table-scroll";
-    table.before(scroller);
+    table.before(container);
+    container.append(scroller);
     scroller.append(table);
   });
   return template.innerHTML;

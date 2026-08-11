@@ -1321,11 +1321,20 @@
   border-collapse: collapse;
   font-size: .92em;
 }
-.markdown-table-scroll {
+.markdown-table-container {
   max-width: 100%;
   margin: .85em 0;
+}
+.markdown-table-scroll {
+  max-width: 100%;
   overflow-x: auto;
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+}
+.markdown-table-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .markdown-body thead { background: var(--surface-raised); }
 .markdown-body th,
@@ -1741,21 +1750,13 @@
   min-height: 0;
   overflow-y: auto;
   overflow-wrap: anywhere;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: none;
 }
 
 .phone-subtitle-text::-webkit-scrollbar {
-  width: 5px;
-}
-
-.phone-subtitle-text::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.phone-subtitle-text::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-  border-radius: 999px;
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .user-subtitle { color: var(--muted); }
@@ -1827,7 +1828,11 @@
   scrollbar-width: none;
 }
 
-.video-transcription-body::-webkit-scrollbar { display: none; }
+.video-transcription-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
 
 .video-transcription-intro {
   display: grid;

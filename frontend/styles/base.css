@@ -63,8 +63,52 @@ html {
 }
 
 .scroll-container::-webkit-scrollbar {
+  display: none;
   width: 0;
   height: 0;
+}
+
+.global-scrollbar {
+  position: fixed;
+  z-index: 30;
+  display: block;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.global-scrollbar::before {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: rgb(141 152 147 / 13%);
+}
+
+.global-scrollbar-x::before {
+  inset: 2px 0;
+}
+
+.global-scrollbar-y::before {
+  inset: 0 2px;
+}
+
+.global-scrollbar-thumb {
+  display: block;
+  position: absolute;
+  border-radius: 999px;
+  background: rgb(141 152 147 / 58%);
+  will-change: transform;
+}
+
+.global-scrollbar-x .global-scrollbar-thumb {
+  top: 2px;
+}
+
+.global-scrollbar-y .global-scrollbar-thumb {
+  right: 2px;
+}
+
+.global-scrollbar[hidden] {
   display: none;
 }
 
