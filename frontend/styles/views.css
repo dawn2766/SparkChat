@@ -1401,6 +1401,12 @@
   padding-bottom: 0;
 }
 
+@media (display-mode: standalone) {
+  .chat-view.keyboard-open .composer {
+    padding-bottom: 7px;
+  }
+}
+
 .composer-edit-header {
   display: none;
 }

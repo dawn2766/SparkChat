@@ -75,15 +75,12 @@ function bindChatViewport() {
   const { signal } = viewportSyncController;
   const viewport = window.visualViewport;
   const composer = document.querySelector("#composer textarea");
-  let layoutHeight = window.innerHeight;
+  const standalone = window.matchMedia("(display-mode: standalone)").matches;
   let frame = 0;
   const syncHeight = () => {
-    const focused = document.activeElement === composer;
-    if (!focused) layoutHeight = window.innerHeight;
-    const layoutResized = focused && layoutHeight - window.innerHeight > 150;
-    const height = layoutResized ? window.innerHeight : viewport?.height || window.innerHeight;
+    const height = standalone ? viewport?.height || window.innerHeight : window.innerHeight;
     const offsetTop = viewport?.offsetTop || 0;
-    const keyboardOpen = layoutResized || window.innerHeight - height > 150;
+    const keyboardOpen = document.activeElement === composer && window.innerHeight - (viewport?.height || window.innerHeight) > 150;
     document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
     document.documentElement.style.setProperty("--chat-viewport-offset", `${offsetTop}px`);
     document.querySelector(".chat-view")?.classList.toggle("keyboard-open", keyboardOpen);
