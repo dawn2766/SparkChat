@@ -9,6 +9,7 @@ const APP_HISTORY_KEY = "sparkchat";
 let currentRoute = { name: "auth" };
 let routeTransition = Promise.resolve();
 let historyReady = false;
+const resizableTextareas = new WeakSet();
 
 function writeHistory(route, mode = "push") {
   const method = mode === "replace" ? "replaceState" : "pushState";
@@ -36,6 +37,47 @@ function normalizeSimpleInputs(root = document) {
     field.setAttribute("data-1p-ignore", "true");
     field.setAttribute("data-bwignore", "true");
     field.setAttribute("data-protonpass-ignore", "true");
+  });
+}
+
+function bindResizableTextareas(root = document) {
+  root.querySelectorAll("textarea.character-prompt").forEach((textarea) => {
+    if (resizableTextareas.has(textarea)) return;
+    resizableTextareas.add(textarea);
+
+    const shell = document.createElement("div");
+    shell.className = "textarea-resize-shell";
+    textarea.before(shell);
+    shell.append(textarea);
+
+    const handle = document.createElement("div");
+    handle.className = "textarea-resize-handle";
+    handle.setAttribute("aria-hidden", "true");
+    shell.append(handle);
+
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = textarea.getBoundingClientRect().height;
+      const minHeight = Number.parseFloat(getComputedStyle(textarea).minHeight) || 0;
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add("is-resizing-textarea");
+
+      const resize = (moveEvent) => {
+        textarea.style.height = `${Math.max(minHeight, startHeight + moveEvent.clientY - startY)}px`;
+      };
+      const stop = () => {
+        handle.removeEventListener("pointermove", resize);
+        handle.removeEventListener("pointerup", stop);
+        handle.removeEventListener("pointercancel", stop);
+        document.body.classList.remove("is-resizing-textarea");
+      };
+
+      handle.addEventListener("pointermove", resize);
+      handle.addEventListener("pointerup", stop);
+      handle.addEventListener("pointercancel", stop);
+      handle.addEventListener("lostpointercapture", stop, { once: true });
+    });
   });
 }
 
@@ -186,7 +228,11 @@ app.setAttribute("data-app", "sparkchat");
 bindNativeInteractionGuards();
 bindCustomSelects(app);
 normalizeSimpleInputs(app);
-new MutationObserver(() => normalizeSimpleInputs(app)).observe(app, { childList: true, subtree: true });
+bindResizableTextareas(app);
+new MutationObserver(() => {
+  normalizeSimpleInputs(app);
+  bindResizableTextareas(app);
+}).observe(app, { childList: true, subtree: true });
 window.addEventListener("popstate", (event) => {
   if (event.state?.guard) {
     writeHistory(currentRoute);

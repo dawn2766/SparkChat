@@ -289,6 +289,31 @@
   scrollbar-gutter: stable;
 }
 
+.textarea-resize-shell {
+  position: relative;
+}
+
+.textarea-resize-shell .character-prompt {
+  display: block;
+  width: 100%;
+  resize: none;
+}
+
+.textarea-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: -7px;
+  left: 0;
+  height: 14px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+body.is-resizing-textarea {
+  cursor: ns-resize;
+  user-select: none;
+}
+
 .text-area::-webkit-scrollbar,
 .markdown-body pre::-webkit-scrollbar {
   display: none;
