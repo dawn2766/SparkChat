@@ -4,7 +4,7 @@ import { marked } from "https://cdn.jsdelivr.net/npm/marked@15.0.12/+esm";
 import { api, apiUrl, streamChat, streamTranslation, streamVoiceTranslation, transcribeVideo } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
-import { normalizeMarkdown } from "../markdown-normalization.js";
+import { stableStreamingMarkdown } from "../streaming-markdown.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, confirmDeletion, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
@@ -24,7 +24,7 @@ const streamingMarkdownFrames = new WeakMap();
 marked.setOptions({ gfm: true, breaks: true });
 
 function markdownMarkup(content) {
-  const html = DOMPurify.sanitize(marked.parse(normalizeMarkdown(content)));
+  const html = DOMPurify.sanitize(marked.parse(String(content || "")));
   const template = document.createElement("template");
   template.innerHTML = html;
   template.content.querySelectorAll("a[href]").forEach((link) => {
@@ -40,33 +40,23 @@ function markdownMarkup(content) {
   return template.innerHTML;
 }
 
-function cancelStreamingMarkdown(element) {
-  if (!element) return;
-  const pendingRender = streamingMarkdownFrames.get(element);
-  if (pendingRender) cancelAnimationFrame(pendingRender.frame);
-  streamingMarkdownFrames.delete(element);
-}
-
-function cancelMessageMarkdown(message, bubble) {
-  cancelStreamingMarkdown(bubble);
-  cancelStreamingMarkdown(message?.querySelector(".reasoning-panel .markdown-body"));
-}
-
 function renderMarkdown(element, content) {
-  cancelStreamingMarkdown(element);
+  const pendingFrame = streamingMarkdownFrames.get(element);
+  if (pendingFrame) cancelAnimationFrame(pendingFrame);
+  streamingMarkdownFrames.delete(element);
   element.innerHTML = markdownMarkup(content);
 }
 
 function renderStreamingMarkdown(element, content) {
-  const stableContent = String(content || "").replace(/[ \t]*(?:\r?\n[ \t]*)+$/, "");
-  const pendingRender = streamingMarkdownFrames.get(element);
-  if (pendingRender) cancelAnimationFrame(pendingRender.frame);
+  const stableContent = stableStreamingMarkdown(content);
+  const pendingFrame = streamingMarkdownFrames.get(element);
+  if (pendingFrame) cancelAnimationFrame(pendingFrame);
   const frame = requestAnimationFrame(() => {
     streamingMarkdownFrames.delete(element);
     element.innerHTML = markdownMarkup(stableContent);
     scrollMessages();
   });
-  streamingMarkdownFrames.set(element, { frame });
+  streamingMarkdownFrames.set(element, frame);
 }
 
 function bindChatViewport() {
@@ -299,7 +289,6 @@ async function rewriteUserMessage(messageId, content) {
       state.activeConversation.title = content.slice(0, 80);
     }
     syncActiveConversation(result.answer);
-    cancelMessageMarkdown(assistant, assistantBubble);
     assistant.className = "message";
     assistant.dataset.messageId = String(result.messageId || "");
     assistant.dataset.originalContent = result.answer;
@@ -467,7 +456,6 @@ function bindMessageActions() {
         message.classList.remove("pending");
         scrollMessages();
       }, Number(regenerateButton.dataset.regenerate), state.activeConversation.id);
-      cancelMessageMarkdown(message, bubble);
       bubble.textContent = result.answer;
       message.dataset.messageId = result.messageId;
       const index = state.messages.findIndex((item) => item.id === Number(result.messageId));
@@ -480,7 +468,6 @@ function bindMessageActions() {
       message.classList.remove("pending");
       bindSpeechButtons();
     } catch (error) {
-      cancelMessageMarkdown(message, bubble);
       const messageContent = message.querySelector(".message-content");
       if (state.active.characterType === "assistant" && messageContent) {
         messageContent.innerHTML = oldMessageContent;
@@ -677,7 +664,6 @@ async function sendMessage(event) {
     }
     state.messages.push({ id: result.messageId, role: "assistant", content: result.answer, reasoning: result.reasoning });
     syncActiveConversation(result.answer);
-    cancelMessageMarkdown(assistant, bubble);
     assistant.classList.remove("pending");
     assistant.dataset.messageId = result.messageId;
     assistant.dataset.originalContent = result.answer;
@@ -687,7 +673,6 @@ async function sendMessage(event) {
     });
     bindSpeechButtons();
   } catch (error) {
-    cancelMessageMarkdown(assistant, bubble);
     assistant.classList.remove("pending");
     assistant.classList.add("failed");
     bubble.textContent = `未能送达回复：${error.message}`;

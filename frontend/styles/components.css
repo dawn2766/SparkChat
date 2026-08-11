@@ -271,34 +271,50 @@
   padding: 0 12px;
 }
 
+.text-area,
+.markdown-table-scroll,
+.markdown-body pre {
+  scrollbar-color: rgb(141 152 147 / 30%) transparent;
+  scrollbar-width: thin;
+}
+
 .text-area {
   min-height: 112px;
   padding: 11px 12px;
   resize: vertical;
   overflow-y: auto;
-  scrollbar-color: rgb(141 152 147 / 30%) transparent;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
 }
 
-.text-area:focus {
+.text-area:focus,
+.markdown-table-scroll:hover,
+.markdown-body pre:hover {
   scrollbar-color: rgb(141 152 147 / 58%) transparent;
 }
 
-.text-area::-webkit-scrollbar {
+.text-area::-webkit-scrollbar,
+.markdown-table-scroll::-webkit-scrollbar,
+.markdown-body pre::-webkit-scrollbar {
   width: 5px;
+  height: 5px;
 }
 
-.text-area::-webkit-scrollbar-track {
+.text-area::-webkit-scrollbar-track,
+.markdown-table-scroll::-webkit-scrollbar-track,
+.markdown-body pre::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.text-area::-webkit-scrollbar-thumb {
+.text-area::-webkit-scrollbar-thumb,
+.markdown-table-scroll::-webkit-scrollbar-thumb,
+.markdown-body pre::-webkit-scrollbar-thumb {
   background: rgb(141 152 147 / 30%);
   border-radius: 999px;
 }
 
-.text-area:focus::-webkit-scrollbar-thumb {
+.text-area:focus::-webkit-scrollbar-thumb,
+.markdown-table-scroll:hover::-webkit-scrollbar-thumb,
+.markdown-body pre:hover::-webkit-scrollbar-thumb {
   background: rgb(141 152 147 / 58%);
 }
 
