@@ -113,14 +113,12 @@ const transcripts = [];
 const completedTurns = [];
 let reportedUsage;
 let audioAvailableCount = 0;
-const replayStates = [];
 const session = await createRealtimeSession({ id: 1, name: "测试角色" }, {
   onText: (text) => subtitles.push(text),
   onTranscript: (data) => transcripts.push(data.text),
   onTurnComplete: (turn) => completedTurns.push(turn),
   onUsage: (usage) => { reportedUsage = usage; },
   onTurnAudioAvailable: () => { audioAvailableCount += 1; },
-  onReplayChange: (playing) => replayStates.push(playing),
 });
 const pcm = new Int16Array([1000, -1000]).buffer;
 
@@ -211,12 +209,9 @@ assert.deepEqual(completedTurns.at(-1), {
 assert.equal(completedTurns.length, 2, "重复的回合结束事件不应重复保存消息");
 assert.equal(session.hasLastTurnAudio(), true, "角色话轮完成后应保留本轮音频");
 assert.equal(session.toggleLastTurnPlayback(), true, "角色话轮完成后应能回放本轮音频");
-assert.equal(replayStates.at(-1), true, "回放开始时应切换为暂停图标状态");
 assert.equal(startedNodes.length, 2, "回放应重新调度缓存的本轮音频");
 assert.equal(session.toggleLastTurnPlayback(), false, "回放过程中再次点击应暂停播放");
-assert.equal(replayStates.at(-1), false, "回放暂停时应恢复喇叭图标状态");
 assert.equal(session.toggleLastTurnPlayback(), true, "暂停后再次点击应继续播放");
-assert.equal(replayStates.at(-1), true, "回放继续时应再次切换为暂停图标状态");
 assert.equal(startedNodes.length, 3, "继续播放应创建新的音频源");
 assert.equal(startedNodes.at(-1).startArgs[1], 0, "未经过播放时间时应从原暂停位置继续");
 socket.emit(pcm);

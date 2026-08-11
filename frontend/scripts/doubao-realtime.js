@@ -84,7 +84,6 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     replayingLastTurn = false;
     replayNode = null;
     replayOffset = 0;
-    handlers.onReplayChange?.(false);
     handlers.onPlaybackChange?.(false);
   };
 
@@ -98,7 +97,6 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     replayNode.disconnect();
     replayNode = null;
     clearTimeout(playbackTimer);
-    handlers.onReplayChange?.(false);
     handlers.onPlaybackChange?.(false);
     return false;
   };
@@ -129,12 +127,10 @@ export async function createRealtimeSession(character, handlers = {}, options = 
       replayNode = null;
       replayingLastTurn = false;
       replayOffset = 0;
-      handlers.onReplayChange?.(false);
       handlers.onPlaybackChange?.(false);
     };
     node.start(audioContext.currentTime, replayOffset);
     clearTimeout(playbackTimer);
-    handlers.onReplayChange?.(true);
     handlers.onPlaybackChange?.(true);
     return true;
   };
