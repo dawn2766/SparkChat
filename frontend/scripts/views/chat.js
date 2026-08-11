@@ -1,12 +1,15 @@
-import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
-import { api, apiUrl, streamChat, streamTranslation, streamVoiceTranslation } from "../api.js";
+import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, FileVideo, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Upload, Video, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/+esm";
+import { marked } from "https://cdn.jsdelivr.net/npm/marked@15.0.12/+esm";
+import { api, apiUrl, streamChat, streamTranslation, streamVoiceTranslation, transcribeVideo } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, confirmDeletion, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
+import { compressVideo, inspectVideo } from "../video-compression.js";
 
-const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Volume2, X } });
+const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, FileVideo, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Upload, Video, Volume2, X } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -15,6 +18,45 @@ let dictationGeneration = 0;
 let pendingDictationConversation = null;
 let composerDraftBeforeEdit = "";
 let viewportSyncController = null;
+const streamingMarkdownFrames = new WeakMap();
+
+marked.setOptions({ gfm: true, breaks: true });
+
+function markdownMarkup(content) {
+  const html = DOMPurify.sanitize(marked.parse(String(content || "")));
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll("a[href]").forEach((link) => {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  });
+  template.content.querySelectorAll("table").forEach((table) => {
+    const scroller = document.createElement("div");
+    scroller.className = "markdown-table-scroll";
+    table.before(scroller);
+    scroller.append(table);
+  });
+  return template.innerHTML;
+}
+
+function renderMarkdown(element, content) {
+  const pendingFrame = streamingMarkdownFrames.get(element);
+  if (pendingFrame) cancelAnimationFrame(pendingFrame);
+  streamingMarkdownFrames.delete(element);
+  element.innerHTML = markdownMarkup(content);
+}
+
+function renderStreamingMarkdown(element, content) {
+  const stableContent = String(content || "").replace(/[ \t]*(?:\r?\n[ \t]*)+$/, "");
+  const pendingFrame = streamingMarkdownFrames.get(element);
+  if (pendingFrame) cancelAnimationFrame(pendingFrame);
+  const frame = requestAnimationFrame(() => {
+    streamingMarkdownFrames.delete(element);
+    element.innerHTML = markdownMarkup(stableContent);
+    scrollMessages();
+  });
+  streamingMarkdownFrames.set(element, frame);
+}
 
 function bindChatViewport() {
   viewportSyncController?.abort();
@@ -147,22 +189,49 @@ function messageActionsMarkup(message, isAssistant, canRegenerate = false) {
   const regenerateButton = canRegenerate
     ? `<button class="message-action" data-regenerate="${message.id || ""}" aria-label="重新生成这条回复"><i data-lucide="refresh-cw"></i></button>`
     : "";
-  return `<span class="message-actions"><button class="message-action" data-copy aria-label="复制这条回复"><i data-lucide="copy"></i></button><button class="message-action translate-button" data-translate="${message.id || ""}" aria-label="翻译这条回复"><i data-lucide="languages"></i></button>${regenerateButton}<button class="speak-button" data-speak aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button></span>`;
+  if (message.characterType === "assistant") {
+    return `<span class="message-actions"><button class="message-action" data-copy aria-label="复制这条回复"><i data-lucide="copy"></i></button>${regenerateButton}</span>`;
+  }
+  return `<span class="message-actions"><button class="message-action" data-copy aria-label="复制这条回复"><i data-lucide="copy"></i></button><button class="message-action translate-button" data-translate="${message.id || ""}" aria-label="翻译这条回复"><i data-lucide="languages"></i></button><button class="speak-button" data-speak aria-label="朗读这条回复"><i data-lucide="volume-2"></i></button>${regenerateButton}</span>`;
 }
 
 function assistantStampMarkup(message, character, canRegenerate = false) {
   return `<span class="stamp">${messageActionsMarkup(message, true, canRegenerate)}</span>`;
 }
 
+function reasoningMarkup(reasoning) {
+  return reasoning
+    ? `<details class="reasoning-panel"><summary>已深度思考</summary><div class="markdown-body">${markdownMarkup(reasoning)}</div></details>`
+    : "";
+}
+
 function messageMarkup(message, character, canRegenerate = false, canEdit = false) {
   const isAssistant = message.role === "assistant";
-  const stamp = isAssistant ? assistantStampMarkup(message, character, canRegenerate) : messageActionsMarkup(message, false);
+  const isDeepSeek = character?.characterType === "assistant";
+  const stamp = isAssistant ? assistantStampMarkup({ ...message, characterType: character?.characterType }, character, canRegenerate) : messageActionsMarkup(message, false);
   const bubble = isAssistant
-    ? `<div class="bubble">${esc(message.content)}</div>`
+    ? `${isDeepSeek ? reasoningMarkup(message.reasoning) : ""}<div class="bubble${isDeepSeek ? " assistant-text markdown-body" : ""}">${isDeepSeek ? markdownMarkup(message.content) : esc(message.content)}</div>`
     : canEdit
       ? `<button class="bubble user-bubble" type="button" data-edit-user-message aria-label="编辑并重新发送这条消息">${esc(message.content)}</button>`
       : `<div class="bubble">${esc(message.content)}</div>`;
   return `<div class="message ${message.role === "user" ? "user" : ""}" data-message-id="${message.id || ""}" data-original-content="${esc(message.content)}"><div class="message-content">${bubble}${stamp}</div></div>`;
+}
+
+function updateStreamingAssistant(message, bubble, partial, reasoning) {
+  if (state.active?.characterType === "assistant") renderStreamingMarkdown(bubble, partial);
+  else bubble.textContent = partial;
+  if (!reasoning || state.active?.characterType !== "assistant") return;
+  let panel = message.querySelector(".reasoning-panel");
+  if (!panel) {
+    panel = document.createElement("details");
+    panel.className = "reasoning-panel";
+    panel.open = true;
+    panel.innerHTML = '<summary>正在深度思考</summary><div class="markdown-body"></div>';
+    bubble.before(panel);
+  }
+  panel.open = true;
+  panel.querySelector("summary").textContent = "正在深度思考";
+  renderStreamingMarkdown(panel.querySelector("div"), reasoning);
 }
 
 async function rewriteUserMessage(messageId, content) {
@@ -200,15 +269,15 @@ async function rewriteUserMessage(messageId, content) {
   updateComposerState(composer?.content);
   scrollMessages();
   try {
-    const result = await streamChat(state.active.id, content, (partial) => {
-      assistantBubble.textContent = partial;
+    const result = await streamChat(state.active.id, content, (partial, reasoning) => {
+      updateStreamingAssistant(assistant, assistantBubble, partial, reasoning);
       assistant.classList.remove("pending");
       scrollMessages();
     }, messageId, state.activeConversation.id, true);
     const userIndex = state.messages.findIndex((message) => message.id === messageId);
     if (userIndex >= 0) {
       state.messages[userIndex].content = content;
-      state.messages.splice(userIndex + 1, state.messages.length, { id: result.messageId, role: "assistant", content: result.answer });
+      state.messages.splice(userIndex + 1, state.messages.length, { id: result.messageId, role: "assistant", content: result.answer, reasoning: result.reasoning });
     }
     if (userIndex === 0 && !state.activeConversation.titleCustom) {
       state.activeConversation.title = content.slice(0, 80);
@@ -217,7 +286,7 @@ async function rewriteUserMessage(messageId, content) {
     assistant.className = "message";
     assistant.dataset.messageId = String(result.messageId || "");
     assistant.dataset.originalContent = result.answer;
-    assistant.innerHTML = `<div class="message-content"><div class="bubble">${esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active, true)}</div>`;
+    assistant.innerHTML = `<div class="message-content">${state.active.characterType === "assistant" ? reasoningMarkup(result.reasoning) : ""}<div class="bubble${state.active.characterType === "assistant" ? " assistant-text markdown-body" : ""}">${state.active.characterType === "assistant" ? markdownMarkup(result.answer) : esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}</div>`;
     container.querySelectorAll("[data-regenerate]").forEach((button) => {
       if (!assistant.contains(button)) button.remove();
     });
@@ -362,6 +431,7 @@ function bindMessageActions() {
     const bubble = message.querySelector(".bubble");
     const oldText = bubble.textContent;
     const oldOriginalContent = message.dataset.originalContent || oldText;
+    const oldMessageContent = message.querySelector(".message-content")?.innerHTML || "";
     state.sending = true;
     regenerateButton.disabled = true;
     message.classList.add("pending");
@@ -370,20 +440,35 @@ function bindMessageActions() {
     const regenerateTranslateButton = message.querySelector("[data-translate]");
     regenerateTranslateButton?.classList.remove("active");
     regenerateTranslateButton?.setAttribute("aria-label", "翻译这条回复");
+    if (state.active.characterType === "assistant") {
+      message.querySelector(".reasoning-panel")?.remove();
+      bubble.textContent = "正在重新回应…";
+    }
     try {
-      const result = await streamChat(state.active.id, "", (partial) => {
-        bubble.textContent = partial;
+      const result = await streamChat(state.active.id, "", (partial, reasoning) => {
+        updateStreamingAssistant(message, bubble, partial, reasoning);
         message.classList.remove("pending");
         scrollMessages();
       }, Number(regenerateButton.dataset.regenerate), state.activeConversation.id);
       bubble.textContent = result.answer;
       message.dataset.messageId = result.messageId;
       const index = state.messages.findIndex((item) => item.id === Number(result.messageId));
-      if (index >= 0) state.messages[index].content = result.answer;
+      if (index >= 0) state.messages[index] = { ...state.messages[index], content: result.answer, reasoning: result.reasoning };
       message.dataset.originalContent = result.answer;
+      const messageContent = message.querySelector(".message-content");
+      if (messageContent) {
+        messageContent.innerHTML = `${state.active.characterType === "assistant" ? reasoningMarkup(result.reasoning) : ""}<div class="bubble${state.active.characterType === "assistant" ? " assistant-text markdown-body" : ""}">${state.active.characterType === "assistant" ? markdownMarkup(result.answer) : esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}`;
+      }
       message.classList.remove("pending");
+      bindSpeechButtons();
     } catch (error) {
-      bubble.textContent = oldText;
+      const messageContent = message.querySelector(".message-content");
+      if (state.active.characterType === "assistant" && messageContent) {
+        messageContent.innerHTML = oldMessageContent;
+        refreshIcons();
+      } else {
+        bubble.textContent = oldText;
+      }
       const wasTranslated = oldText !== oldOriginalContent;
       message.dataset.translated = wasTranslated ? "true" : "false";
       regenerateTranslateButton?.classList.toggle("active", wasTranslated);
@@ -550,7 +635,11 @@ async function sendMessage(event) {
   const bubble = assistant.querySelector(".bubble");
   scrollMessages();
   try {
-    const result = await streamChat(state.active.id, content, (partial) => { bubble.textContent = partial; assistant.classList.remove("pending"); scrollMessages(); }, null, state.activeConversation.id);
+    const result = await streamChat(state.active.id, content, (partial, reasoning) => {
+      updateStreamingAssistant(assistant, bubble, partial, reasoning);
+      assistant.classList.remove("pending");
+      scrollMessages();
+    }, null, state.activeConversation.id);
     userMessage.id = result.userMessageId;
     const userElement = container.querySelector(`.message.user:not([data-message-id]), .message.user[data-message-id=""]`);
     if (userElement) {
@@ -567,13 +656,15 @@ async function sendMessage(event) {
     if (state.messages.length === 1 && !state.activeConversation.titleCustom) {
       state.activeConversation.title = content.slice(0, 80);
     }
-    state.messages.push({ id: result.messageId, role: "assistant", content: result.answer });
+    state.messages.push({ id: result.messageId, role: "assistant", content: result.answer, reasoning: result.reasoning });
     syncActiveConversation(result.answer);
     assistant.classList.remove("pending");
     assistant.dataset.messageId = result.messageId;
     assistant.dataset.originalContent = result.answer;
-    container.querySelectorAll("[data-regenerate]").forEach((button) => button.remove());
-    assistant.querySelector(".stamp").outerHTML = assistantStampMarkup({ id: result.messageId, content: result.answer }, state.active, true);
+    assistant.innerHTML = `<div class="message-content">${state.active.characterType === "assistant" ? reasoningMarkup(result.reasoning) : ""}<div class="bubble${state.active.characterType === "assistant" ? " assistant-text markdown-body" : ""}">${state.active.characterType === "assistant" ? markdownMarkup(result.answer) : esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}</div>`;
+    container.querySelectorAll("[data-regenerate]").forEach((button) => {
+      if (!assistant.contains(button)) button.remove();
+    });
     bindSpeechButtons();
   } catch (error) {
     assistant.classList.remove("pending");
@@ -601,15 +692,16 @@ function voiceOptions(selectedId) {
 }
 
 function settingsMarkup(character) {
+  const isDeepSeek = character.characterType === "assistant";
+  const modelOptions = (character.modelOptions || []).map((model) => `<option value="${esc(model.id)}" ${character.modelId === model.id ? "selected" : ""}>${esc(model.name)}</option>`).join("");
   return `<dialog class="app-dialog character-dialog" id="character-dialog" tabindex="-1">
     <form class="dialog-panel" id="character-form">
       <header class="dialog-header"><div><h2>角色配置</h2></div></header>
       <div class="dialog-body character-fields scroll-container">
         ${avatarFieldMarkup({ currentUrl: character.avatarUrl, id: "edit-avatar" })}
         <div class="field"><label for="edit-name">角色名称</label><input class="text-input" id="edit-name" name="name" maxlength="40" required value="${esc(character.name)}"></div>
-        <div class="field"><label for="edit-persona">身份背景</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
-        <div class="field"><label for="edit-language">回答语言</label><select class="select-input" id="edit-language" name="language"><option value="zh" ${character.language === "zh" ? "selected" : ""}>中文</option><option value="en" ${character.language === "en" ? "selected" : ""}>英文</option></select></div>
-        <div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>
+        <div class="field"><label for="edit-persona">${isDeepSeek ? "系统提示词" : "身份背景"}</label><textarea class="text-area character-prompt" id="edit-persona" name="persona" maxlength="2400" required>${esc(character.persona)}</textarea></div>
+        ${isDeepSeek ? `<div class="field"><label for="edit-model">模型</label><select class="select-input" id="edit-model" name="modelId">${modelOptions}</select></div><div class="field"><label for="edit-thinking">深度思考</label><select class="select-input" id="edit-thinking" name="thinkingEnabled"><option value="1" ${character.thinkingEnabled ? "selected" : ""}>开启</option><option value="0" ${!character.thinkingEnabled ? "selected" : ""}>关闭</option></select></div>` : `<div class="field"><label for="edit-language">回答语言</label><select class="select-input" id="edit-language" name="language"><option value="zh" ${character.language === "zh" ? "selected" : ""}>中文</option><option value="en" ${character.language === "en" ? "selected" : ""}>英文</option></select></div><div class="field"><label for="edit-voice">角色音色</label><select class="select-input" id="edit-voice" name="voiceId">${voiceOptions(character.voiceId)}</select><input type="hidden" name="voiceName" value="${esc(character.voiceName)}"></div>`}
       </div>
       <footer class="dialog-actions character-form-actions ${character.isPreset ? "" : "dialog-actions-split"}">${character.isPreset ? "" : '<button type="button" class="danger-button" data-delete-character>删除角色</button>'}<span class="dialog-action-group"><button type="button" class="secondary-button" data-dialog-close>取消</button><button class="primary-button" type="submit">保存配置</button></span></footer>
     </form>
@@ -623,9 +715,11 @@ function bindSettings(onBack) {
   const resetForm = () => {
     form.name.value = state.active.name;
     form.persona.value = state.active.persona;
-    form.voiceId.value = state.active.voiceId;
-    form.voiceName.value = state.active.voiceName;
-    form.language.value = state.active.language || "zh";
+    if (form.voiceId) form.voiceId.value = state.active.voiceId;
+    if (form.voiceName) form.voiceName.value = state.active.voiceName;
+    if (form.language) form.language.value = state.active.language || "zh";
+    if (form.modelId) form.modelId.value = state.active.modelId;
+    if (form.thinkingEnabled) form.thinkingEnabled.value = state.active.thinkingEnabled ? "1" : "0";
     form.avatarUrl.value = state.active.avatarUrl || "";
     form.querySelector("[data-avatar-editor]").resetAvatar(state.active.avatarUrl || "");
     resetTextareaSize(form.persona);
@@ -663,7 +757,7 @@ function bindSettings(onBack) {
     event.preventDefault();
     cancelSettings();
   };
-  form.voiceId.onchange = () => { form.voiceName.value = form.voiceId.selectedOptions[0].dataset.name; };
+  if (form.voiceId) form.voiceId.onchange = () => { form.voiceName.value = form.voiceId.selectedOptions[0].dataset.name; };
   form.onsubmit = async (event) => {
     event.preventDefault();
     const button = event.submitter;
@@ -1146,6 +1240,101 @@ function bindHistory() {
   renderHistoryBody(dialog);
 }
 
+function videoTranscriptionMarkup() {
+  return `<section class="voice-history-page video-transcription-page"><header class="page-heading"><button class="icon-button video-transcription-back" type="button" aria-label="返回聊天"><i data-lucide="arrow-left"></i></button><h1>视频转文字</h1></header><div class="video-transcription-body"><div class="video-transcription-intro"><i data-lucide="file-video"></i><strong>还原模型最终生成内容</strong><p>上传流式输出录屏，自动识别滚动和重复文字。</p></div><label class="video-upload-control"><input id="video-transcription-file" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.avi"><i data-lucide="upload"></i><span>选择视频</span></label><div class="video-progress" hidden><div class="video-progress-track"><span></span></div><div class="video-progress-meta"><span data-video-progress-label>准备中</span><span data-video-progress-value>0%</span></div></div><div class="video-result" hidden><div class="video-result-text markdown-body" data-video-result-text></div><div class="video-result-actions"><button class="secondary-button" type="button" data-video-copy><i data-lucide="copy"></i>复制</button><button class="primary-button" type="button" data-video-regenerate><i data-lucide="refresh-cw"></i>重新生成</button></div></div></div></section>`;
+}
+
+function bindVideoTranscriptionPage(page, onBack) {
+  const input = page.querySelector("#video-transcription-file");
+  const progress = page.querySelector(".video-progress");
+  const track = page.querySelector(".video-progress-track span");
+  const label = page.querySelector("[data-video-progress-label]");
+  const value = page.querySelector("[data-video-progress-value]");
+  const result = page.querySelector(".video-result");
+  const resultText = page.querySelector("[data-video-result-text]");
+  let selectedFile = null;
+  let preparedFile = null;
+  let taskController = null;
+  let taskGeneration = 0;
+  let displayedProgress = 0;
+  const setProgress = (percent, message) => {
+    displayedProgress = Math.max(displayedProgress, percent);
+    track.style.width = `${displayedProgress}%`;
+    value.textContent = `${displayedProgress}%`;
+    label.textContent = message;
+  };
+  const run = async (sourceFile, reusePreparedFile = false) => {
+    if (!sourceFile) return;
+    taskController?.abort();
+    taskController = new AbortController();
+    const generation = ++taskGeneration;
+    const { signal } = taskController;
+    displayedProgress = 0;
+    track.style.width = "0%";
+    value.textContent = "0%";
+    const updateTaskProgress = (percent, message) => {
+      if (generation === taskGeneration && !signal.aborted) setProgress(percent, message);
+    };
+    progress.hidden = false;
+    result.hidden = true;
+    input.disabled = true;
+    try {
+      let uploadFile = reusePreparedFile ? preparedFile : null;
+      if (!uploadFile) {
+        updateTaskProgress(2, "正在检测视频参数");
+        const metadata = await inspectVideo(sourceFile, { signal });
+        uploadFile = metadata.needsCompression
+          ? await compressVideo(sourceFile, metadata, (percent, message) => updateTaskProgress(Math.round(percent * 0.3), message), { signal })
+          : sourceFile;
+        preparedFile = uploadFile;
+      }
+      const data = await transcribeVideo(uploadFile, (percent, message) => updateTaskProgress(30 + Math.round(percent * 0.7), message), { signal });
+      if (generation !== taskGeneration) return;
+      renderMarkdown(resultText, data.text);
+      result.hidden = false;
+    } catch (error) {
+      if (error.name === "AbortError" || signal.aborted) return;
+      notify(error.message);
+      displayedProgress = 0;
+      setProgress(0, "处理失败");
+    } finally {
+      if (generation === taskGeneration) input.disabled = false;
+    }
+  };
+  input.onchange = () => {
+    selectedFile = input.files?.[0] || null;
+    preparedFile = null;
+    input.value = "";
+    run(selectedFile);
+  };
+  page.querySelector("[data-video-copy]").onclick = async () => {
+    await navigator.clipboard.writeText(resultText.textContent);
+    notify("已复制");
+  };
+  page.querySelector("[data-video-regenerate]").onclick = () => run(selectedFile, true);
+  const cancelTask = (reason = "操作已取消") => {
+    taskGeneration += 1;
+    taskController?.abort(new DOMException(reason, "AbortError"));
+  };
+  const handlePageHide = () => cancelTask();
+  window.addEventListener("pagehide", handlePageHide, { once: true });
+  page.querySelector(".video-transcription-back").onclick = () => {
+    cancelTask();
+    window.removeEventListener("pagehide", handlePageHide);
+    page.remove();
+    onBack();
+  };
+}
+
+function openVideoTranscription() {
+  const page = document.createElement("section");
+  page.innerHTML = videoTranscriptionMarkup();
+  app.append(page.firstElementChild);
+  const videoPage = app.querySelector(".video-transcription-page");
+  refreshIcons();
+  bindVideoTranscriptionPage(videoPage, () => renderChat({ onBack: window.__sparkchatBack }));
+}
+
 export async function openChat(id, onBack) {
   state.active = state.characters.find((item) => item.id === id);
   window.__sparkchatBack = onBack;
@@ -1166,14 +1355,15 @@ export function renderChat({ onBack }) {
   const latestAssistantIndex = state.messages.reduce((latest, message, index) => message.role === "assistant" ? index : latest, -1);
   const latestUserIndex = state.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
   const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex, index === latestUserIndex)).join("");
-  app.innerHTML = `<section class="chat-view"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button><button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button></div></header><div class="messages scroll-container" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
+  app.innerHTML = `<section class="chat-view ${character.characterType === "assistant" ? "deepseek-chat" : ""}"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button>${character.characterType === "assistant" ? '<button class="icon-button chat-tool" id="video-transcription" aria-label="视频转文字"><i data-lucide="file-video"></i></button>' : '<button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button>'}</div></header><div class="messages scroll-container" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
   bindChatViewport();
   document.querySelector("#back").onclick = async () => {
     viewportSyncController?.abort();
     await stopVoiceInteraction();
     onBack();
   };
-  document.querySelector("#call").onclick = startPhone;
+  document.querySelector("#call")?.addEventListener("click", startPhone);
+  document.querySelector("#video-transcription")?.addEventListener("click", openVideoTranscription);
   bindHistory();
   document.querySelector("#composer").onsubmit = sendMessage;
   const cancelButton = document.querySelector(".composer-edit-cancel");

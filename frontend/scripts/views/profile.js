@@ -113,15 +113,16 @@ function voiceOptions(selectedId) {
 }
 
 function roleEditorMarkup(character = null) {
+  const isDeepSeek = character?.characterType === "assistant";
+  const modelOptions = (character?.modelOptions || []).map((model) => `<option value="${esc(model.id)}" ${character.modelId === model.id ? "selected" : ""}>${esc(model.name)}</option>`).join("");
   return `<form class="role-admin-form" data-character-id="${character?.id || ""}">
     <div class="admin-editor-scroll character-fields scroll-container">
       ${avatarFieldMarkup({ currentUrl: character?.avatarUrl || "", id: `admin-avatar-${character?.id || "new"}` })}
       <div class="field"><label>角色名称</label><input class="text-input" name="name" maxlength="40" required value="${esc(character?.name || "")}"></div>
-      <div class="field"><label>身份背景</label><textarea class="text-area character-prompt" name="persona" maxlength="2400" required>${esc(character?.persona || "")}</textarea></div>
-      <div class="field"><label>回答语言</label><select class="select-input" name="language"><option value="zh" ${character?.language !== "en" ? "selected" : ""}>中文</option><option value="en" ${character?.language === "en" ? "selected" : ""}>英文</option></select></div>
-      <div class="field"><label>角色音色</label><select class="select-input" name="voiceId" required>${voiceOptions(character?.voiceId)}</select></div>
+      <div class="field"><label>${isDeepSeek ? "系统提示词" : "身份背景"}</label><textarea class="text-area character-prompt" name="persona" maxlength="2400" required>${esc(character?.persona || "")}</textarea></div>
+      ${isDeepSeek ? `<div class="field"><label>模型</label><select class="select-input" name="modelId">${modelOptions}</select></div><div class="field"><label>深度思考</label><select class="select-input" name="thinkingEnabled"><option value="1" ${character.thinkingEnabled ? "selected" : ""}>开启</option><option value="0" ${!character.thinkingEnabled ? "selected" : ""}>关闭</option></select></div>` : `<div class="field"><label>回答语言</label><select class="select-input" name="language"><option value="zh" ${character?.language !== "en" ? "selected" : ""}>中文</option><option value="en" ${character?.language === "en" ? "selected" : ""}>英文</option></select></div><div class="field"><label>角色音色</label><select class="select-input" name="voiceId" required>${voiceOptions(character?.voiceId)}</select></div>`}
     </div>
-    <footer class="dialog-actions admin-editor-actions character-form-actions dialog-actions-split">${character ? '<button class="danger-button" type="button" data-delete-role>删除角色</button>' : "<span></span>"}<button class="primary-button" type="submit">${character ? "保存并同步" : "新增并同步"}</button></footer>
+    <footer class="dialog-actions admin-editor-actions character-form-actions dialog-actions-split">${character && !isDeepSeek ? '<button class="danger-button" type="button" data-delete-role>删除角色</button>' : "<span></span>"}<button class="primary-button" type="submit">${character ? "保存并同步" : "新增并同步"}</button></footer>
   </form>`;
 }
 

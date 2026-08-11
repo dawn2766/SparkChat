@@ -38,16 +38,32 @@ function Stop-PortProcess([int]$Port) {
     }
 }
 
+function Wait-PortProcess([System.Diagnostics.Process]$Process, [int]$Port, [string]$Name) {
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        if ($Process.HasExited) {
+            throw "$Name 启动失败，进程已退出（退出码 $($Process.ExitCode)）。"
+        }
+        if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+    throw "$Name 启动超时：端口 $Port 未开始监听。"
+}
+
 Stop-PortProcess $speechPort
 Stop-PortProcess $clientPort
 
-Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
+$realtimeProcess = Start-Process powershell.exe -PassThru -WorkingDirectory $PSScriptRoot -ArgumentList @(
     "-NoExit", "-Command", "& '$python' -m backend.realtime"
 )
+Wait-PortProcess $realtimeProcess $speechPort "豆包实时代理"
 
-Start-Process powershell.exe -WorkingDirectory $PSScriptRoot -ArgumentList @(
+$webProcess = Start-Process powershell.exe -PassThru -WorkingDirectory $PSScriptRoot -ArgumentList @(
     "-NoExit", "-Command", "& '$python' -m backend.app"
 )
+Wait-PortProcess $webProcess $clientPort "SparkChat Web 服务"
 
 Write-Host "SparkChat 已启动" -ForegroundColor Green
 Write-Host "客户端: http://127.0.0.1:$clientPort" -ForegroundColor Cyan

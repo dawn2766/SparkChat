@@ -57,6 +57,30 @@
     max-width: 88%;
   }
 
+  .deepseek-chat .message:not(.user) {
+    max-width: 100%;
+  }
+
+  .markdown-body pre {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .markdown-body th,
+  .markdown-body td {
+    max-width: 72vw;
+  }
+
+  .video-transcription-body {
+    padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .video-result-actions > button {
+    flex: 1 1 0;
+    justify-content: center;
+    min-width: 0;
+  }
+
   .app-dialog {
     width: calc(100vw - 24px);
     max-height: calc(100dvh - 24px);

@@ -5,6 +5,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -18,6 +19,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .avatar_storage import AVATAR_DATA_URL, store_avatar_snapshot
 from .conversation_memory import (
+    DEEPSEEK_MEMORY_UPDATE_INTERVAL_TOKENS,
+    DEEPSEEK_RECENT_CONTEXT_MAX_TOKENS,
     VOICE_MEMORY_UPDATE_INTERVAL_TOKENS,
     VOICE_RECENT_CONTEXT_MAX_TOKENS,
     allocate_input_tokens,
@@ -28,7 +31,16 @@ from .conversation_memory import (
     should_update_memory,
     stable_messages_for_memory,
 )
-from .model_config import CHAT_MODELS, DEFAULT_CHAT_MODEL, MEMORY_MODEL, TRANSLATION_MODEL
+from .model_config import (
+    CHAT_MODELS,
+    DEFAULT_CHAT_MODEL,
+    DEEPSEEK_ASSISTANT_NAME,
+    DEEPSEEK_DEFAULT_MODEL,
+    DEEPSEEK_MODELS,
+    MEMORY_MODEL,
+    TRANSLATION_MODEL,
+    VIDEO_TRANSCRIPTION_MODEL,
+)
 from .realtime_server import normalize_prompt_language
 from .speech import DoubaoSpeechClient, DoubaoSpeechError, SPEECH_CONSOLE_URL, prepare_speech_text
 
@@ -38,6 +50,32 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", PROJECT_ROOT / "data" / "sparkchat.db"))
 AVATAR_DIR = Path(os.getenv("AVATAR_DIR", DATABASE_PATH.parent / "avatars")).resolve()
+VIDEO_UPLOAD_MAX_BYTES = 512 * 1024 * 1024
+VIDEO_UPLOAD_EXTENSIONS = {".mp4", ".avi", ".mov"}
+VIDEO_TRANSCRIPTION_PROMPT = """这是一段大语言模型流式生成内容的屏幕录制，录制过程中可能上下滚动，文字会逐步追加，也可能出现重叠画面。
+
+你的任务是恢复视频中大语言模型最终呈现给用户的完整正式回答。请严格遵守：
+1. 区分“思考过程/深度思考/推理过程/分析过程”和“最终回答”。凡是界面中标注为思考、推理、分析，或明显属于模型内部推演、草稿、自我修正的文字，一律排除，不得写入结果。
+2. 只提取模型最终回答区域中面向用户展示的文字。不要包含用户提问、界面按钮、标题栏、时间、状态提示或其他应用界面文字。
+3. 按视频时间顺序追踪滚动内容，对相邻画面的重叠文字准确去重；保留最终回答原有的段落、列表、标点和顺序，不得总结、改写、补写或删减。
+4. 如果思考区域和最终回答区域同时可见，以最终回答区域为唯一输出来源；无法确认属于最终回答的文字不要输出。
+
+只输出恢复后的最终回答原文，不要添加说明、前言、标签、引用符号或 Markdown 代码围栏。"""
+VIDEO_PROCESSING_TIMEOUT_SECONDS = 300
+
+
+def wait_for_video_processing(file_id):
+    deadline = time.monotonic() + VIDEO_PROCESSING_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        uploaded_file = ark.files.retrieve(file_id)
+        status = str(getattr(uploaded_file, "status", "") or "").lower()
+        if status == "active":
+            return
+        if status in {"error", "failed", "cancelled", "expired"}:
+            detail = getattr(uploaded_file, "last_error", None) or status
+            raise RuntimeError(f"视频预处理失败：{detail}")
+        time.sleep(1)
+    raise TimeoutError("视频预处理超过 5 分钟，请压缩或缩短视频后重试")
 
 
 def get_secret_key():
@@ -53,11 +91,17 @@ def get_secret_key():
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 app.config.update(
     SECRET_KEY=get_secret_key(),
+    MAX_CONTENT_LENGTH=VIDEO_UPLOAD_MAX_BYTES,
     PERMANENT_SESSION_LIFETIME=timedelta(days=3650),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "false").lower() == "true",
 )
+
+
+@app.errorhandler(413)
+def upload_too_large(_error):
+    return jsonify(error="压缩后的视频不能超过 512 MB"), 413
 
 doubao_speech = DoubaoSpeechClient()
 ark = OpenAI(
@@ -211,6 +255,8 @@ def is_english_text(text):
 
 
 def character_instructions(character, language=None):
+    if character_value(character, "character_type") == "assistant":
+        return str(character_value(character, "persona")).strip()
     language = normalize_prompt_language(language or character_value(character, "language"))
     labels = CHARACTER_PROMPT_LABELS[language]
     name = character_value(character, "name")
@@ -235,6 +281,8 @@ def language_constraint(language):
 
 
 def build_agent_instructions(character, include_stage_directions=True):
+    if character_value(character, "character_type") == "assistant":
+        return str(character_value(character, "persona")).strip()
     language = normalize_prompt_language(character["language"])
     prompts = SYSTEM_PROMPTS if include_stage_directions else CORE_SYSTEM_PROMPTS
     constraint = language_constraint(language)
@@ -293,6 +341,9 @@ def init_db():
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
             language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
+            character_type TEXT NOT NULL DEFAULT 'character' CHECK(character_type IN ('character', 'assistant')),
+            model_id TEXT,
+            thinking_enabled INTEGER NOT NULL DEFAULT 1,
             avatar_url TEXT NOT NULL DEFAULT '',
             is_preset INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -308,6 +359,9 @@ def init_db():
             voice_id TEXT NOT NULL,
             voice_name TEXT NOT NULL,
             language TEXT NOT NULL DEFAULT 'zh' CHECK(language IN ('zh', 'en')),
+            character_type TEXT NOT NULL DEFAULT 'character' CHECK(character_type IN ('character', 'assistant')),
+            model_id TEXT,
+            thinking_enabled INTEGER NOT NULL DEFAULT 1,
             avatar_url TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (user_id, character_id),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -331,6 +385,7 @@ def init_db():
             conversation_id INTEGER,
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
+            reasoning TEXT,
             token_count INTEGER,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -430,8 +485,9 @@ def init_db():
         database.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
     if "chat_model" not in user_columns:
         database.execute("ALTER TABLE users ADD COLUMN chat_model TEXT")
+    supported_model_placeholders = ", ".join("?" for _ in CHAT_MODELS)
     database.execute(
-        "UPDATE users SET chat_model = ? WHERE chat_model IS NULL OR chat_model NOT IN (?, ?)",
+        f"UPDATE users SET chat_model = ? WHERE chat_model IS NULL OR chat_model NOT IN ({supported_model_placeholders})",
         (DEFAULT_CHAT_MODEL, *CHAT_MODELS),
     )
     voice_columns = {row["name"] for row in database.execute("PRAGMA table_info(voices)").fetchall()}
@@ -451,6 +507,12 @@ def init_db():
             """
         )
     character_columns = {row["name"] for row in database.execute("PRAGMA table_info(characters)").fetchall()}
+    if "character_type" not in character_columns:
+        database.execute("ALTER TABLE characters ADD COLUMN character_type TEXT NOT NULL DEFAULT 'character'")
+    if "model_id" not in character_columns:
+        database.execute("ALTER TABLE characters ADD COLUMN model_id TEXT")
+    if "thinking_enabled" not in character_columns:
+        database.execute("ALTER TABLE characters ADD COLUMN thinking_enabled INTEGER NOT NULL DEFAULT 1")
     if "language" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
     if "name_en" not in character_columns:
@@ -458,6 +520,12 @@ def init_db():
     if "persona_en" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN persona_en TEXT")
     override_columns = {row["name"] for row in database.execute("PRAGMA table_info(character_overrides)").fetchall()}
+    if "character_type" not in override_columns:
+        database.execute("ALTER TABLE character_overrides ADD COLUMN character_type TEXT NOT NULL DEFAULT 'character'")
+    if "model_id" not in override_columns:
+        database.execute("ALTER TABLE character_overrides ADD COLUMN model_id TEXT")
+    if "thinking_enabled" not in override_columns:
+        database.execute("ALTER TABLE character_overrides ADD COLUMN thinking_enabled INTEGER NOT NULL DEFAULT 1")
     if "avatar_url" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''")
     if "language" not in override_columns:
@@ -535,6 +603,8 @@ def init_db():
         database.execute("ALTER TABLE messages ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE")
     if "token_count" not in message_columns:
         database.execute("ALTER TABLE messages ADD COLUMN token_count INTEGER")
+    if "reasoning" not in message_columns:
+        database.execute("ALTER TABLE messages ADD COLUMN reasoning TEXT")
     database.execute(
         "UPDATE messages SET token_count = MAX(1, LENGTH(content)) WHERE token_count IS NULL"
     )
@@ -683,18 +753,44 @@ def serialize_user(row):
 
 
 def serialize_character(row):
-    return {
+    character = {
         "id": row["id"],
         "name": row["name"],
         "persona": row["persona"],
         "voiceId": row["voice_id"],
         "voiceName": row["voice_name"],
         "language": row["language"],
+        "characterType": row["character_type"] if "character_type" in row.keys() else "character",
+        "modelId": row["model_id"] if "model_id" in row.keys() else None,
+        "thinkingEnabled": bool(row["thinking_enabled"]) if "thinking_enabled" in row.keys() else True,
         "avatarUrl": row["avatar_url"],
         "isPreset": bool(row["is_preset"]),
         "lastMessage": (row["last_message"] or "") if "last_message" in row.keys() else "",
         "lastMessageAt": row["last_message_at"] if "last_message_at" in row.keys() else None,
     }
+    if character["characterType"] == "assistant":
+        character["modelOptions"] = [
+            {"id": model_id, "name": name} for model_id, name in DEEPSEEK_MODELS.items()
+        ]
+    return character
+
+
+def ensure_deepseek_assistant():
+    database = get_db()
+    assistant = database.execute(
+        "SELECT id FROM characters WHERE character_type = 'assistant' LIMIT 1"
+    ).fetchone()
+    if assistant is None:
+        database.execute(
+            """
+            INSERT INTO characters (
+                owner_id, name, persona, voice_id, voice_name, language,
+                character_type, model_id, thinking_enabled, is_preset
+            ) VALUES (NULL, ?, ?, '', '', 'zh', 'assistant', ?, 1, 1)
+            """,
+            (DEEPSEEK_ASSISTANT_NAME, "你是一个可靠、清晰、直接的智能助手。", DEEPSEEK_DEFAULT_MODEL),
+        )
+        database.commit()
 
 
 def avatar_url_from(payload, default=""):
@@ -885,6 +981,23 @@ def character_values(payload, fallback=None):
     return name, persona, voice_id, voice["name"], language
 
 
+def assistant_values(payload, fallback=None):
+    fallback = fallback or {}
+    name = str(payload.get("name", character_value(fallback, "name", DEEPSEEK_ASSISTANT_NAME))).strip()
+    persona = str(payload.get("persona", character_value(fallback, "persona"))).strip()
+    model_id = str(payload.get("modelId", character_value(fallback, "model_id", DEEPSEEK_DEFAULT_MODEL))).strip()
+    thinking_enabled = payload.get("thinkingEnabled", character_value(fallback, "thinking_enabled", 1))
+    if not name or not persona:
+        raise ValueError("请完整填写角色名称和系统提示词")
+    if len(name) > 40 or len(persona) > 2400:
+        raise ValueError("角色名称或系统提示词超过长度限制")
+    if model_id not in DEEPSEEK_MODELS:
+        raise ValueError("不支持该 DeepSeek 模型")
+    if isinstance(thinking_enabled, str):
+        thinking_enabled = thinking_enabled.lower() in {"1", "true", "on", "enabled"}
+    return name, persona, model_id, int(bool(thinking_enabled))
+
+
 def parse_persona_translation(response_text):
     text = str(response_text or "").strip()
     if text.startswith("```"):
@@ -1018,6 +1131,7 @@ def schedule_missing_persona_translations(database):
 @app.get("/api/admin/characters")
 @admin_required
 def list_preset_characters():
+    ensure_deepseek_assistant()
     rows = get_db().execute(
         "SELECT * FROM characters WHERE is_preset = 1 ORDER BY created_at, id"
     ).fetchall()
@@ -1057,23 +1171,37 @@ def update_preset_character(character_id):
     ).fetchone()
     if character is None:
         return jsonify(error="未找到该预置角色"), 404
+    payload = request.get_json(silent=True) or {}
     try:
-        values = character_values(request.get_json(silent=True) or {}, character)
-        avatar_url = avatar_url_from(request.get_json(silent=True) or {}, character["avatar_url"])
+        avatar_url = avatar_url_from(payload, character["avatar_url"])
+        if character_value(character, "character_type") == "assistant":
+            assistant = assistant_values(payload, character)
+        else:
+            values = character_values(payload, character)
     except ValueError as error:
         return jsonify(error=str(error)), 400
     database = get_db()
-    database.execute(
-        """
-        UPDATE characters
-        SET name = ?, persona = ?, voice_id = ?, voice_name = ?, language = ?, avatar_url = ?
-        WHERE id = ?
-        """,
-        (*values, avatar_url, character_id),
-    )
+    if character_value(character, "character_type") == "assistant":
+        database.execute(
+            """
+            UPDATE characters
+            SET name = ?, persona = ?, model_id = ?, thinking_enabled = ?, avatar_url = ?
+            WHERE id = ?
+            """,
+            (*assistant, avatar_url, character_id),
+        )
+    else:
+        database.execute(
+            """
+            UPDATE characters
+            SET name = ?, persona = ?, voice_id = ?, voice_name = ?, language = ?, avatar_url = ?
+            WHERE id = ?
+            """,
+            (*values, avatar_url, character_id),
+        )
     database.execute("DELETE FROM character_overrides WHERE character_id = ?", (character_id,))
     database.commit()
-    if (
+    if character_value(character, "character_type") != "assistant" and (
         values[0] != character["name"]
         or values[1] != character["persona"]
         or not character_value(character, "name_en")
@@ -1090,10 +1218,12 @@ def update_preset_character(character_id):
 @admin_required
 def delete_preset_character(character_id):
     character = get_db().execute(
-        "SELECT id FROM characters WHERE id = ? AND is_preset = 1", (character_id,)
+        "SELECT id, character_type FROM characters WHERE id = ? AND is_preset = 1", (character_id,)
     ).fetchone()
     if character is None:
         return jsonify(error="未找到该预置角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不可删除"), 409
     database = get_db()
     database.execute("DELETE FROM characters WHERE id = ?", (character_id,))
     database.commit()
@@ -1169,6 +1299,7 @@ def update_system_voice(voice_id):
 @app.get("/api/characters")
 @login_required
 def list_characters():
+    ensure_deepseek_assistant()
     rows = get_db().execute(
         """
         WITH latest_conversations AS (
@@ -1197,6 +1328,9 @@ def list_characters():
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
             COALESCE(o.voice_name, c.voice_name) AS voice_name,
             COALESCE(o.language, c.language) AS language,
+            COALESCE(o.character_type, c.character_type) AS character_type,
+            COALESCE(o.model_id, c.model_id) AS model_id,
+            COALESCE(o.thinking_enabled, c.thinking_enabled) AS thinking_enabled,
             COALESCE(o.avatar_url, c.avatar_url) AS avatar_url,
             lm.content AS last_message,
             lm.created_at AS last_message_at
@@ -1207,7 +1341,9 @@ def list_characters():
         LEFT JOIN latest_messages lm
             ON lm.conversation_id = lc.id AND lm.position = 1
         WHERE c.is_preset = 1 OR c.owner_id = ?
-        ORDER BY c.is_preset DESC, COALESCE(last_message_at, c.created_at) DESC
+        ORDER BY c.is_preset DESC,
+            CASE WHEN c.character_type = 'assistant' THEN 1 ELSE 0 END,
+            COALESCE(last_message_at, c.created_at) DESC
         """,
         (
             session["user_id"],
@@ -1272,6 +1408,27 @@ def update_character(character_id):
     if character is None:
         return jsonify(error="未找到该角色"), 404
     payload = request.get_json(silent=True) or {}
+    if character_value(character, "character_type") == "assistant":
+        try:
+            values = assistant_values(payload, character)
+            avatar_url = avatar_url_from(payload, character["avatar_url"])
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+        get_db().execute(
+            """
+            INSERT INTO character_overrides (
+                user_id, character_id, name, persona, voice_id, voice_name,
+                language, avatar_url, character_type, model_id, thinking_enabled
+            ) VALUES (?, ?, ?, ?, '', '', 'zh', ?, 'assistant', ?, ?)
+            ON CONFLICT(user_id, character_id) DO UPDATE SET
+                name = excluded.name, persona = excluded.persona,
+                avatar_url = excluded.avatar_url, character_type = excluded.character_type,
+                model_id = excluded.model_id, thinking_enabled = excluded.thinking_enabled
+            """,
+            (session["user_id"], character_id, values[0], values[1], avatar_url, values[2], values[3]),
+        )
+        get_db().commit()
+        return jsonify(character=serialize_character(get_character(character_id)))
     required = ("name", "persona", "voiceId", "voiceName")
     if any(not str(payload.get(field, "")).strip() for field in required):
         return jsonify(error="请完整填写角色名称、人设与音色"), 400
@@ -1379,6 +1536,9 @@ def get_character(character_id):
             COALESCE(o.voice_id, c.voice_id) AS voice_id,
             COALESCE(o.voice_name, c.voice_name) AS voice_name,
             COALESCE(o.language, c.language) AS language,
+            COALESCE(o.character_type, c.character_type) AS character_type,
+            COALESCE(o.model_id, c.model_id) AS model_id,
+            COALESCE(o.thinking_enabled, c.thinking_enabled) AS thinking_enabled,
             COALESCE(o.avatar_url, c.avatar_url) AS avatar_url
         FROM characters c
         LEFT JOIN character_overrides o ON o.character_id = c.id AND o.user_id = ?
@@ -1386,6 +1546,15 @@ def get_character(character_id):
         """,
         (session["user_id"], character_id, session["user_id"]),
     ).fetchone()
+
+
+def assistant_voice_rejection(character_id):
+    character = get_character(character_id)
+    if character is None:
+        return jsonify(error="未找到该角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不支持语音功能"), 409
+    return None
 
 
 def get_conversation(character_id, conversation_id):
@@ -1426,8 +1595,11 @@ def get_voice_conversation(character_id, conversation_id):
 @app.get("/api/characters/<int:character_id>/voice-conversations")
 @login_required
 def list_voice_conversations(character_id):
-    if get_character(character_id) is None:
+    character = get_character(character_id)
+    if character is None:
         return jsonify(error="未找到该角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不支持语音通话"), 409
     rows = get_db().execute(
         """
         SELECT c.id, c.title, c.title_custom, c.created_at, c.updated_at,
@@ -1445,8 +1617,11 @@ def list_voice_conversations(character_id):
 @app.post("/api/characters/<int:character_id>/voice-conversations")
 @login_required
 def create_voice_conversation(character_id):
-    if get_character(character_id) is None:
+    character = get_character(character_id)
+    if character is None:
         return jsonify(error="未找到该角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不支持语音通话"), 409
     cursor = get_db().execute(
         "INSERT INTO voice_conversations (user_id, character_id) VALUES (?, ?)",
         (session["user_id"], character_id),
@@ -1460,8 +1635,9 @@ def create_voice_conversation(character_id):
 @app.patch("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>")
 @login_required
 def rename_voice_conversation(character_id, conversation_id):
-    if get_character(character_id) is None:
-        return jsonify(error="未找到该角色"), 404
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     if get_voice_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该语音通话"), 404
     title = str((request.get_json(silent=True) or {}).get("title", "")).strip()
@@ -1480,8 +1656,9 @@ def rename_voice_conversation(character_id, conversation_id):
 @app.delete("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>")
 @login_required
 def delete_voice_conversation(character_id, conversation_id):
-    if get_character(character_id) is None:
-        return jsonify(error="未找到该角色"), 404
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     if get_voice_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该语音通话"), 404
     get_db().execute(
@@ -1495,8 +1672,9 @@ def delete_voice_conversation(character_id, conversation_id):
 @app.get("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/messages")
 @login_required
 def list_voice_messages(character_id, conversation_id):
-    if get_character(character_id) is None:
-        return jsonify(error="未找到该角色"), 404
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     if get_voice_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该语音通话"), 404
     rows = get_db().execute(
@@ -1509,8 +1687,9 @@ def list_voice_messages(character_id, conversation_id):
 @app.post("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/messages")
 @login_required
 def create_voice_message(character_id, conversation_id):
-    if get_character(character_id) is None:
-        return jsonify(error="未找到该角色"), 404
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     conversation = get_voice_conversation(character_id, conversation_id)
     if conversation is None:
         return jsonify(error="未找到该语音通话"), 404
@@ -1578,8 +1757,9 @@ def create_voice_message(character_id, conversation_id):
 @app.delete("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/turns/<turn_id>")
 @login_required
 def delete_voice_turn(character_id, conversation_id, turn_id):
-    if get_character(character_id) is None:
-        return jsonify(error="未找到该角色"), 404
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     conversation = get_voice_conversation(character_id, conversation_id)
     if conversation is None:
         return jsonify(error="未找到该语音通话"), 404
@@ -1656,8 +1836,9 @@ def delete_voice_turn(character_id, conversation_id, turn_id):
 @app.post("/api/characters/<int:character_id>/voice-conversations/<int:conversation_id>/usage")
 @login_required
 def update_voice_turn_usage(character_id, conversation_id):
-    if get_character(character_id) is None:
-        return jsonify(error="未找到该角色"), 404
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     if get_voice_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该语音通话"), 404
     payload = request.get_json(silent=True) or {}
@@ -1846,9 +2027,10 @@ def schedule_voice_memory_update(conversation_id):
 @app.post("/api/characters/<int:character_id>/voice-messages/<int:message_id>/translate")
 @login_required
 def translate_voice_message(character_id, message_id):
+    rejection = assistant_voice_rejection(character_id)
+    if rejection:
+        return rejection
     character = get_character(character_id)
-    if character is None:
-        return jsonify(error="未找到该角色"), 404
     message = get_db().execute(
         """
         SELECT id, conversation_id, content FROM voice_messages
@@ -2005,7 +2187,7 @@ def list_messages(character_id, conversation_id):
     if get_conversation(character_id, conversation_id) is None:
         return jsonify(error="未找到该对话"), 404
     rows = get_db().execute(
-        "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
+        "SELECT id, role, content, reasoning, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
         (conversation_id,),
     ).fetchall()
     return jsonify(messages=[dict(row) for row in rows])
@@ -2068,6 +2250,7 @@ def conversation_context(
     database,
     conversation_id,
     language="zh",
+    character_type="character",
     pending_user_message=None,
     before_message_id=None,
 ):
@@ -2081,12 +2264,12 @@ def conversation_context(
     covered_through = memory["covered_through_message_id"] if memory else 0
     if before_message_id is None:
         rows = database.execute(
-            "SELECT id, role, content, token_count FROM messages WHERE conversation_id = ? ORDER BY id",
+            "SELECT id, role, content, reasoning, token_count FROM messages WHERE conversation_id = ? ORDER BY id",
             (conversation_id,),
         ).fetchall()
     else:
         rows = database.execute(
-            "SELECT id, role, content, token_count FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id",
+            "SELECT id, role, content, reasoning, token_count FROM messages WHERE conversation_id = ? AND id < ? ORDER BY id",
             (conversation_id, before_message_id),
         ).fetchall()
     messages = [dict(row) for row in rows]
@@ -2094,7 +2277,12 @@ def conversation_context(
         pending = dict(pending_user_message)
         pending.setdefault("token_count", message_token_count(pending))
         messages.append(pending)
-    recent_messages = select_recent_messages(messages, covered_through)
+    max_tokens = (
+        DEEPSEEK_RECENT_CONTEXT_MAX_TOKENS
+        if character_type == "assistant"
+        else None
+    )
+    recent_messages = select_recent_messages(messages, covered_through, max_tokens=max_tokens) if max_tokens else select_recent_messages(messages, covered_through)
     model_input = [{"role": row["role"], "content": row["content"]} for row in recent_messages]
     summary = memory["summary"].strip() if memory and memory["summary"] else ""
     if summary:
@@ -2141,7 +2329,8 @@ def run_memory_update(conversation_id):
             database = get_db()
             conversation = database.execute(
                 """
-                SELECT conv.id, COALESCE(o.language, c.language) AS language
+                SELECT conv.id, COALESCE(o.language, c.language) AS language,
+                    COALESCE(o.character_type, c.character_type) AS character_type
                 FROM conversations conv
                 JOIN characters c ON c.id = conv.character_id
                 LEFT JOIN character_overrides o
@@ -2169,7 +2358,17 @@ def run_memory_update(conversation_id):
                 ).fetchall()
             ]
             stable_messages = stable_messages_for_memory(messages, covered_through)
-            if not should_update_memory(messages, covered_through) or not stable_messages:
+            interval_tokens = (
+                DEEPSEEK_MEMORY_UPDATE_INTERVAL_TOKENS
+                if conversation["character_type"] == "assistant"
+                else None
+            )
+            update_due = (
+                should_update_memory(messages, covered_through, interval_tokens=interval_tokens)
+                if interval_tokens
+                else should_update_memory(messages, covered_through)
+            )
+            if not update_due or not stable_messages:
                 return
             new_covered_through = stable_messages[-1]["id"]
             role_labels = ("用户", "数字角色") if language == "zh" else ("User", "Character")
@@ -2257,20 +2456,26 @@ def stream_character_response(
     @stream_with_context
     def generate():
         full_response = []
+        reasoning_response = []
         usage = {"input_tokens": 0, "output_tokens": 0}
         instructions = build_agent_instructions(character)
         try:
-            user = get_db().execute(
-                "SELECT chat_model FROM users WHERE id = ?", (session["user_id"],)
-            ).fetchone()
-            selected_model = user["chat_model"] if user else None
-            chat_model = selected_model if selected_model in CHAT_MODELS else DEFAULT_CHAT_MODEL
+            if character_value(character, "character_type") == "assistant":
+                chat_model = character_value(character, "model_id") or DEEPSEEK_DEFAULT_MODEL
+                thinking_type = "enabled" if character_value(character, "thinking_enabled", 1) else "disabled"
+            else:
+                user = get_db().execute(
+                    "SELECT chat_model FROM users WHERE id = ?", (session["user_id"],)
+                ).fetchone()
+                selected_model = user["chat_model"] if user else None
+                chat_model = selected_model if selected_model in CHAT_MODELS else DEFAULT_CHAT_MODEL
+                thinking_type = "disabled"
             response = ark.responses.create(
                 model=chat_model,
                 instructions=instructions,
                 input=[{"role": row["role"], "content": row["content"]} for row in history],
                 stream=True,
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body={"thinking": {"type": thinking_type}},
             )
             for event in response:
                 event_usage = response_usage(event)
@@ -2279,6 +2484,9 @@ def stream_character_response(
                 if event.type == "response.output_text.delta":
                     full_response.append(event.delta)
                     yield f"data: {json.dumps({'type': 'delta', 'text': event.delta}, ensure_ascii=False)}\n\n"
+                elif event.type == "response.reasoning_summary_text.delta":
+                    reasoning_response.append(event.delta)
+                    yield f"data: {json.dumps({'type': 'reasoning_delta', 'text': event.delta}, ensure_ascii=False)}\n\n"
             final_text = "".join(full_response).strip()
             message_id = replace_message_id
             if final_text:
@@ -2319,8 +2527,8 @@ def stream_character_response(
                         (conversation_id, session["user_id"], rewrite_message_id),
                     )
                     cursor = database.execute(
-                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'assistant', ?)",
-                        (session["user_id"], character["id"], conversation_id, final_text),
+                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content, reasoning) VALUES (?, ?, ?, 'assistant', ?, ?)",
+                        (session["user_id"], character["id"], conversation_id, final_text, "".join(reasoning_response).strip() or None),
                     )
                     message_id = cursor.lastrowid
                     conversation = database.execute(
@@ -2343,15 +2551,16 @@ def stream_character_response(
                     database.commit()
                 elif replace_message_id is None:
                     cursor = get_db().execute(
-                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content) VALUES (?, ?, ?, 'assistant', ?)",
-                        (session["user_id"], character["id"], conversation_id, final_text),
+                        "INSERT INTO messages (user_id, character_id, conversation_id, role, content, reasoning) VALUES (?, ?, ?, 'assistant', ?, ?)",
+                        (session["user_id"], character["id"], conversation_id, final_text, "".join(reasoning_response).strip() or None),
                     )
                     message_id = cursor.lastrowid
                 else:
                     get_db().execute(
-                        "UPDATE messages SET content = ?, token_count = ?, created_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+                        "UPDATE messages SET content = ?, reasoning = ?, token_count = ?, created_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
                         (
                             final_text,
+                            "".join(reasoning_response).strip() or None,
                             usage["output_tokens"] or max(1, len(final_text)),
                             replace_message_id,
                             session["user_id"],
@@ -2382,6 +2591,63 @@ def stream_character_response(
         mimetype="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
+
+
+@app.post("/api/video-transcriptions")
+@login_required
+def transcribe_video():
+    video = request.files.get("video")
+    if video is None or not video.filename:
+        return jsonify(error="请选择要识别的视频"), 400
+    extension = Path(video.filename).suffix.lower()
+    if extension not in VIDEO_UPLOAD_EXTENSIONS:
+        return jsonify(error="仅支持 MP4、AVI 或 MOV 视频"), 400
+    video.stream.seek(0, os.SEEK_END)
+    size = video.stream.tell()
+    video.stream.seek(0)
+    if size <= 0 or size > VIDEO_UPLOAD_MAX_BYTES:
+        return jsonify(error="视频大小需在 512 MB 以内"), 400
+
+    uploaded_file_id = None
+    try:
+        upload = ark.files.create(
+            file=(Path(video.filename).name, video.stream, video.mimetype),
+            purpose="user_data",
+            extra_body={"preprocess_configs": {"video": {"fps": 1.5}}},
+        )
+        uploaded_file_id = upload.id
+        wait_for_video_processing(uploaded_file_id)
+        response = ark.responses.create(
+            model=VIDEO_TRANSCRIPTION_MODEL,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_video", "file_id": uploaded_file_id},
+                        {"type": "input_text", "text": VIDEO_TRANSCRIPTION_PROMPT},
+                    ],
+                }
+            ],
+            stream=True,
+            extra_body={"thinking": {"type": "enabled"}},
+        )
+        text_parts = []
+        for event in response:
+            if event.type == "response.output_text.delta":
+                text_parts.append(event.delta)
+        text = "".join(text_parts).strip()
+        if not text:
+            raise RuntimeError("模型未返回可识别的文字")
+        return jsonify(text=text)
+    except Exception as error:
+        app.logger.exception("Video transcription failed")
+        return jsonify(error=f"视频识别失败：{error}"), 502
+    finally:
+        if uploaded_file_id:
+            try:
+                ark.files.delete(uploaded_file_id)
+            except Exception:
+                app.logger.warning("Unable to delete Ark file %s", uploaded_file_id, exc_info=True)
 
 
 @app.post("/api/characters/<int:character_id>/chat")
@@ -2425,7 +2691,7 @@ def chat(character_id):
         (conversation_id, content[:80], conversation_id, session["user_id"]),
     )
     history, history_rows = conversation_context(
-        database, conversation_id, character["language"]
+        database, conversation_id, character["language"], character["character_type"]
     )
     database.commit()
 
@@ -2471,6 +2737,7 @@ def rewrite_message(character_id, message_id):
         get_db(),
         target["conversation_id"],
         character["language"],
+        character["character_type"],
         {"id": message_id, "role": "user", "content": content, "token_count": None},
         before_message_id=message_id,
     )
@@ -2510,6 +2777,7 @@ def regenerate_message(character_id, message_id):
         get_db(),
         target["conversation_id"],
         character["language"],
+        character["character_type"],
         before_message_id=message_id,
     )
     if not history or history[-1]["role"] != "user":
@@ -2529,6 +2797,8 @@ def translate_message(character_id, message_id):
     character = get_character(character_id)
     if character is None:
         return jsonify(error="未找到该角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不支持翻译"), 409
     message = get_assistant_message(character_id, message_id)
     if message is None:
         return jsonify(error="未找到可翻译的回复"), 404
@@ -2652,6 +2922,8 @@ def speak_message(character_id, message_id):
     character = get_character(character_id)
     if character is None:
         return jsonify(error="未找到该角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不支持语音合成"), 409
     message = get_assistant_message(character_id, message_id)
     if message is None:
         return jsonify(error="未找到可朗读的回复"), 404
@@ -2675,6 +2947,8 @@ def speak_text(character_id):
     character = get_character(character_id)
     if character is None:
         return jsonify(error="未找到该角色"), 404
+    if character["character_type"] == "assistant":
+        return jsonify(error="DeepSeek 助手不支持语音合成"), 409
     payload = request.get_json(silent=True) or {}
     return synthesize_speech_response(character, str(payload.get("text", "")).strip())
 

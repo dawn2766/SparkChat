@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 from backend.model_config import (
@@ -14,6 +15,7 @@ from backend.model_config import (
     TTS_MODEL,
     TTS_RESOURCE_ID,
     TRANSLATION_MODEL,
+    VIDEO_TRANSCRIPTION_MODEL,
 )
 
 
@@ -110,6 +112,54 @@ class SparkChatApiTest(unittest.TestCase):
             self.TEST_CHARACTER_AVATAR,
         )
         self.assertNotIn("unreadCount", response.json["characters"][0])
+
+    def test_video_transcription_uses_seed_turbo_and_cleans_up_file(self):
+        from backend import app as app_module
+
+        calls = {}
+
+        class FakeFiles:
+            def create(self, **kwargs):
+                calls["upload"] = kwargs
+                return type("File", (), {"id": "file-test-video"})()
+
+            def retrieve(self, file_id):
+                calls["wait"] = file_id
+                return type("File", (), {"status": "active"})()
+
+            def delete(self, file_id):
+                calls["delete"] = file_id
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                calls["response"] = kwargs
+                return [type("Event", (), {"type": "response.output_text.delta", "delta": "完整的最终文字"})()]
+
+        original_files = app_module.ark.files
+        original_responses = app_module.ark.responses
+        app_module.ark.files = FakeFiles()
+        app_module.ark.responses = FakeResponses()
+        try:
+            self.login()
+            response = self.client.post(
+                "/api/video-transcriptions",
+                data={"video": (BytesIO(b"fake-video"), "capture.mp4")},
+                content_type="multipart/form-data",
+            )
+        finally:
+            app_module.ark.files = original_files
+            app_module.ark.responses = original_responses
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["text"], "完整的最终文字")
+        self.assertEqual(calls["upload"]["extra_body"]["preprocess_configs"]["video"]["fps"], 1.5)
+        self.assertEqual(calls["wait"], "file-test-video")
+        self.assertEqual(calls["response"]["model"], VIDEO_TRANSCRIPTION_MODEL)
+        self.assertTrue(calls["response"]["stream"])
+        self.assertEqual(calls["response"]["extra_body"]["thinking"]["type"], "enabled")
+        self.assertEqual(calls["response"]["input"][0]["content"][0], {"type": "input_video", "file_id": "file-test-video"})
+        self.assertIn("思考过程", calls["response"]["input"][0]["content"][1]["text"])
+        self.assertEqual(calls["delete"], "file-test-video")
 
     def test_preset_avatar_does_not_follow_later_caralin_changes(self):
         from backend.app import get_db, init_db

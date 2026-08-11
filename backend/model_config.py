@@ -3,6 +3,13 @@
 TRANSLATION_MODEL = "deepseek-v4-flash-ga-260731"
 DEFAULT_CHAT_MODEL = "doubao-seed-character-260628"
 MEMORY_MODEL = "deepseek-v4-flash-ga-260731"
+VIDEO_TRANSCRIPTION_MODEL = "doubao-seed-2-1-turbo-260628"
+DEEPSEEK_ASSISTANT_NAME = "DeepSeek"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash-ga-260731"
+DEEPSEEK_MODELS = {
+    "deepseek-v4-flash-ga-260731": "DeepSeek V4 Flash",
+    "deepseek-v4-pro-260425": "DeepSeek V4 Pro",
+}
 
 CHAT_MODELS = {
     "doubao-seed-character-260628": "Doubao Seed Character",
