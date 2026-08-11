@@ -81,6 +81,7 @@ function bindChatViewport() {
     document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
     document.documentElement.style.setProperty("--chat-viewport-offset", `${offsetTop}px`);
     document.querySelector(".chat-view")?.classList.toggle("keyboard-open", keyboardOpen);
+    if (keyboardOpen) scrollMessages();
   };
   const trackHeight = (remainingFrames = 24) => {
     cancelAnimationFrame(frame);
