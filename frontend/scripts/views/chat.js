@@ -150,7 +150,7 @@ function stopSpeechAudio() {
   speechAudio = null;
   speechUrl = null;
   speechButton = null;
-  setMessageActionBusy(previousMessage, false);
+  setSpeechBusy(previousMessage, false);
   updateSpeechButton(previousButton, false);
   document.querySelectorAll(".speak-button.playing").forEach((item) => item.classList.remove("playing"));
 }
@@ -158,8 +158,8 @@ function stopSpeechAudio() {
 function updateSpeechButton(button, playing) {
   if (!button) return;
   button.classList.toggle("playing", playing);
-  button.setAttribute("aria-label", playing ? "暂停朗读" : "继续朗读");
-  button.innerHTML = `<i data-lucide="${playing ? "pause" : "play"}"></i>`;
+  button.setAttribute("aria-label", playing ? "暂停朗读" : "朗读这条回复");
+  button.innerHTML = `<i data-lucide="${playing ? "pause" : "volume-2"}"></i>`;
   refreshIcons();
 }
 
@@ -223,10 +223,16 @@ function messageActionsMarkup(message, isAssistant, canRegenerate = false) {
 function setMessageActionBusy(message, busy) {
   if (!message) return;
   message.dataset.actionBusy = busy ? "true" : "false";
-  message.querySelectorAll("[data-translate], [data-regenerate], [data-speak]").forEach((button) => {
-    button.disabled = busy;
-  });
+  const translateButton = message.querySelector("[data-translate]");
+  const regenerateButton = message.querySelector("[data-regenerate]");
+  if (translateButton) translateButton.disabled = busy;
+  if (regenerateButton) regenerateButton.disabled = busy;
   updateComposerState(document.querySelector("#composer")?.content);
+}
+
+function setSpeechBusy(message, busy) {
+  if (!message) return;
+  message.dataset.speechBusy = busy ? "true" : "false";
 }
 
 function assistantStampMarkup(message, character, canRegenerate = false) {
@@ -405,7 +411,7 @@ function bindSpeechButtons() {
       const message = button.closest(".message");
       const togglingCurrentAudio = speechAudio && speechButton === button;
       if (state.sending || (message?.dataset.actionBusy === "true" && !togglingCurrentAudio)) return;
-      speak(message?.querySelector(".bubble")?.textContent || "", button);
+      speak(message?.dataset.originalContent || "", button);
     };
   });
   refreshIcons();
@@ -467,6 +473,7 @@ function bindMessageActions() {
     if (!regenerateButton?.dataset.regenerate) return;
     const message = regenerateButton.closest(".message");
     if (state.sending || message.dataset.actionBusy === "true") return;
+    stopSpeechAudio();
     const bubble = message.querySelector(".bubble");
     const oldText = bubble.textContent;
     const oldOriginalContent = message.dataset.originalContent || oldText;
@@ -538,7 +545,7 @@ async function speak(text, button = null) {
   stopSpeechAudio();
   speechButton = button;
   updateSpeechButton(button, true);
-  setMessageActionBusy(message, true);
+  setSpeechBusy(message, true);
   try {
     speechRequest = new AbortController();
     const messageId = button?.closest(".message")?.dataset.messageId;
@@ -560,7 +567,7 @@ async function speak(text, button = null) {
     if (button) button.disabled = false;
     await speechAudio.play();
   } catch (error) {
-    setMessageActionBusy(message, false);
+    setSpeechBusy(message, false);
     if (speechButton === button) stopSpeechAudio();
     if (error.name !== "AbortError") {
       if (error.name === "NotAllowedError") notify("浏览器阻止了音频播放，请再次点击朗读按钮");
@@ -1045,7 +1052,7 @@ async function startPhone() {
     const available = assistantTurnComplete && state.conversation?.hasLastTurnAudio?.();
     livePlay.disabled = !available || (realtimePlaying && !replaying);
     livePlay.classList.toggle("playing", replaying);
-    livePlay.setAttribute("aria-label", replaying ? "停止播放本轮角色语音" : "播放本轮角色语音");
+    livePlay.setAttribute("aria-label", replaying ? "暂停本轮角色语音" : "播放本轮角色语音");
     livePlay.innerHTML = `<i data-lucide="${replaying ? "pause" : "volume-2"}"></i>`;
     refreshIcons();
   };
@@ -1066,9 +1073,7 @@ async function startPhone() {
   liveTranslate.onclick = async () => { const id = liveTranslate.dataset.messageId; if (!id) return; if (liveTranslate.classList.contains("active")) { assistantSubtitleText.textContent = liveTranslate.dataset.originalContent; liveTranslate.classList.remove("active"); return; } liveTranslate.disabled = true; try { assistantSubtitleText.textContent = await streamVoiceTranslation(state.active.id, Number(id), (partial) => { assistantSubtitleText.textContent = partial; }); liveTranslate.classList.add("active"); } catch (error) { notify(error.message); } finally { liveTranslate.disabled = false; } };
   livePlay.onclick = () => {
     if (livePlay.disabled || !state.conversation?.toggleLastTurnPlayback) return;
-    replaying = state.conversation.toggleLastTurnPlayback();
-    syncMicrophone();
-    syncLivePlay();
+    state.conversation.toggleLastTurnPlayback();
   };
   withdrawTurnButton.onclick = async () => {
     const turnId = withdrawableTurnId;
@@ -1191,12 +1196,13 @@ async function startPhone() {
         await saveQueue;
       },
       onTurnAudioAvailable: syncLivePlay,
+      onReplayChange: (playing) => {
+        replaying = playing;
+        syncMicrophone();
+        syncLivePlay();
+      },
       onPlaybackChange: (playing) => {
         realtimePlaying = playing;
-        if (!playing && replaying) {
-          replaying = false;
-          syncMicrophone();
-        }
         syncLivePlay();
         setMode(playing ? "speaking" : "listening");
       },

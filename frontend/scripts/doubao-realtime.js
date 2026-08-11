@@ -64,6 +64,9 @@ export async function createRealtimeSession(character, handlers = {}, options = 
   let lastCompletedAssistantAudio = [];
   let assistantTurnCompleted = false;
   let replayingLastTurn = false;
+  let replayNode = null;
+  let replayOffset = 0;
+  let replayStartedAt = 0;
   const completedUserTurns = new Set();
   const completedAssistantTurns = new Set();
   const withdrawnTurns = new Set();
@@ -79,7 +82,61 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     playbackNodes.clear();
     nextPlaybackTime = audioContext.currentTime;
     replayingLastTurn = false;
+    replayNode = null;
+    replayOffset = 0;
+    handlers.onReplayChange?.(false);
     handlers.onPlaybackChange?.(false);
+  };
+
+  const pauseLastTurnPlayback = () => {
+    if (!replayingLastTurn || !replayNode) return false;
+    replayOffset += Math.max(0, audioContext.currentTime - replayStartedAt);
+    replayingLastTurn = false;
+    replayNode.onended = null;
+    playbackNodes.delete(replayNode);
+    try { replayNode.stop(); } catch (_error) { /* The source may already have ended. */ }
+    replayNode.disconnect();
+    replayNode = null;
+    clearTimeout(playbackTimer);
+    handlers.onReplayChange?.(false);
+    handlers.onPlaybackChange?.(false);
+    return false;
+  };
+
+  const resumeLastTurnPlayback = () => {
+    const samples = lastCompletedAssistantAudio.reduce((total, chunk) => total + chunk.byteLength / 2, 0);
+    if (!samples) return false;
+    const buffer = audioContext.createBuffer(1, samples, outputRate);
+    const channel = buffer.getChannelData(0);
+    let offset = 0;
+    lastCompletedAssistantAudio.forEach((chunk) => {
+      const pcm = new Int16Array(chunk);
+      for (let index = 0; index < pcm.length; index += 1) channel[offset + index] = pcm[index] / 32768;
+      offset += pcm.length;
+    });
+    if (replayOffset >= buffer.duration) replayOffset = 0;
+    const node = audioContext.createBufferSource();
+    node.buffer = buffer;
+    node.connect(audioContext.destination);
+    replayNode = node;
+    replayingLastTurn = true;
+    replayStartedAt = audioContext.currentTime;
+    playbackNodes.add(node);
+    node.onended = () => {
+      playbackNodes.delete(node);
+      node.disconnect();
+      if (replayNode !== node) return;
+      replayNode = null;
+      replayingLastTurn = false;
+      replayOffset = 0;
+      handlers.onReplayChange?.(false);
+      handlers.onPlaybackChange?.(false);
+    };
+    node.start(audioContext.currentTime, replayOffset);
+    clearTimeout(playbackTimer);
+    handlers.onReplayChange?.(true);
+    handlers.onPlaybackChange?.(true);
+    return true;
   };
 
   const reportPlaybackState = () => {
@@ -317,15 +374,9 @@ export async function createRealtimeSession(character, handlers = {}, options = 
     hasLastTurnAudio: () => lastCompletedAssistantAudio.length > 0,
     toggleLastTurnPlayback: () => {
       if (closed || !lastCompletedAssistantAudio.length) return false;
-      if (replayingLastTurn) {
-        interruptPlayback();
-        return false;
-      }
-      interruptPlayback();
+      if (replayingLastTurn) return pauseLastTurnPlayback();
       playbackInterrupted = false;
-      replayingLastTurn = true;
-      lastCompletedAssistantAudio.forEach((chunk) => playPcm(chunk, true));
-      return true;
+      return resumeLastTurnPlayback();
     },
     mute: (muted) => mediaStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; }),
   };
