@@ -1088,10 +1088,14 @@
 }
 
 .chat-view {
+  position: fixed;
+  top: var(--chat-viewport-offset, 0);
+  left: 50%;
+  width: min(100%, 580px);
   height: var(--chat-viewport-height, 100dvh);
   display: flex;
   flex-direction: column;
-  transform: translateY(var(--chat-viewport-offset, 0));
+  transform: translateX(-50%);
   background: var(--bg);
 }
 
