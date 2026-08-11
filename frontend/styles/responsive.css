@@ -235,12 +235,6 @@
     width: min(100%, 340px);
   }
 
-  .message-action,
-  .speak-button {
-    width: 32px;
-    height: 30px;
-  }
-
   .composer {
     grid-template-columns: 44px minmax(0, 1fr) 44px;
   }

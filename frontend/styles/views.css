@@ -1254,12 +1254,6 @@
   margin-left: 0;
 }
 
-.deepseek-chat .message:not(.user) .message-action {
-  width: 22px;
-  padding: 0;
-  justify-items: start;
-}
-
 .markdown-body {
   min-width: 0;
   white-space: normal;
@@ -1361,26 +1355,30 @@
 }
 
 .message-action {
-  width: 22px;
-  height: 19px;
+  width: 36px;
+  height: 36px;
   display: inline-grid;
   place-items: center;
-  padding: 2px 5px;
+  padding: 8px;
   color: var(--muted);
   background: transparent;
 }
 
 .message-action:disabled { opacity: .45; }
 .message-action svg,
-.speak-button svg { width: 13px; height: 13px; }
+.speak-button svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+}
 .message-action.active { color: var(--accent); }
 
 .speak-button {
-  width: 22px;
-  height: 19px;
+  width: 36px;
+  height: 36px;
   display: inline-grid;
   place-items: center;
-  padding: 2px 5px;
+  padding: 8px;
   color: var(--muted);
   background: transparent;
 }
