@@ -1,16 +1,17 @@
-import { ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, FileVideo, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Upload, Video, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
+import { ArrowDown, ArrowLeft, createIcons, Check, Clock3, Copy, Ellipsis, FileVideo, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Upload, Video, Volume2, X } from "https://cdn.jsdelivr.net/npm/lucide@0.468.0/+esm";
 import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/+esm";
 import { marked } from "https://cdn.jsdelivr.net/npm/marked@15.0.12/+esm";
 import { api, apiUrl, streamChat, streamTranslation, streamVoiceTranslation, transcribeVideo } from "../api.js";
 import { createRealtimeSession } from "../doubao-realtime.js";
 import { mergeRealtimeText } from "../realtime-text.js";
 import { stableStreamingMarkdown } from "../streaming-markdown.js";
+import { hasAssistantContentBelowViewport, shouldFollowDeepSeek } from "../chat-scroll.js";
 import { avatarFieldMarkup, bindAvatarEditor } from "../avatar-cropper.js";
 import { app, avatar, confirmDeletion, esc, notify, scrollMessages } from "../dom.js";
 import { state } from "../state.js";
 import { compressVideo, inspectVideo } from "../video-compression.js";
 
-const refreshIcons = () => createIcons({ icons: { ArrowLeft, Check, Clock3, Copy, Ellipsis, FileVideo, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Upload, Video, Volume2, X } });
+const refreshIcons = () => createIcons({ icons: { ArrowDown, ArrowLeft, Check, Clock3, Copy, Ellipsis, FileVideo, Languages, MessagesSquare, Mic, MicOff, Pencil, Pause, Phone, PhoneOff, Play, Plus, RefreshCw, Send, Settings2, Trash2, Undo2, Upload, Video, Volume2, X } });
 let speechAudio = null;
 let speechUrl = null;
 let speechRequest = null;
@@ -20,6 +21,7 @@ let pendingDictationConversation = null;
 let composerDraftBeforeEdit = "";
 let viewportSyncController = null;
 const streamingMarkdownFrames = new WeakMap();
+const chatScroll = { generating: false, mode: "manual", message: null, frame: 0 };
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -57,9 +59,74 @@ function renderStreamingMarkdown(element, content) {
   const frame = requestAnimationFrame(() => {
     streamingMarkdownFrames.delete(element);
     element.innerHTML = markdownMarkup(stableContent);
-    scrollMessages();
+    syncChatScroll();
   });
   streamingMarkdownFrames.set(element, frame);
+}
+
+function latestAssistantMessage() {
+  const messages = document.querySelectorAll("#messages .message:not(.user)");
+  return messages[messages.length - 1] || null;
+}
+
+function syncChatScroll() {
+  cancelAnimationFrame(chatScroll.frame);
+  chatScroll.frame = requestAnimationFrame(() => {
+    chatScroll.frame = 0;
+    const container = document.querySelector("#messages");
+    const button = document.querySelector("#chat-scroll-bottom");
+    if (!container) return;
+    const message = chatScroll.message?.isConnected ? chatScroll.message : latestAssistantMessage();
+    if (chatScroll.generating && state.active?.characterType !== "assistant") {
+      container.scrollTop = container.scrollHeight;
+    } else if (chatScroll.generating && message) {
+      const body = message.querySelector(".assistant-text");
+      if (body && shouldFollowDeepSeek(chatScroll.mode, body.getBoundingClientRect().height, container.clientHeight)) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+    if (!button || !message) return;
+    const viewportBottom = container.getBoundingClientRect().bottom;
+    const contentBottom = message.querySelector(".message-content")?.getBoundingClientRect().bottom ?? message.getBoundingClientRect().bottom;
+    button.hidden = !hasAssistantContentBelowViewport(contentBottom, viewportBottom);
+    button.classList.toggle("generating", chatScroll.generating);
+  });
+}
+
+function beginAssistantScroll(message) {
+  chatScroll.generating = true;
+  chatScroll.mode = state.active?.characterType === "assistant" ? "threshold" : "bottom";
+  chatScroll.message = message;
+  syncChatScroll();
+}
+
+function endAssistantScroll() {
+  chatScroll.generating = false;
+  chatScroll.message = null;
+  syncChatScroll();
+}
+
+function bindChatScroll() {
+  const container = document.querySelector("#messages");
+  const button = document.querySelector("#chat-scroll-bottom");
+  if (!container) return;
+  const takeControl = () => {
+    if (!chatScroll.generating || state.active?.characterType !== "assistant") return;
+    chatScroll.mode = "manual";
+  };
+  container.addEventListener("wheel", takeControl, { passive: true });
+  container.addEventListener("touchstart", takeControl, { passive: true });
+  container.addEventListener("pointerdown", takeControl, { passive: true });
+  container.addEventListener("keydown", takeControl);
+  container.addEventListener("scroll", syncChatScroll, { passive: true });
+  if (button) {
+    button.onclick = () => {
+      chatScroll.mode = "bottom";
+      container.scrollTop = container.scrollHeight;
+      syncChatScroll();
+    };
+  }
+  syncChatScroll();
 }
 
 function bindChatViewport() {
@@ -247,6 +314,47 @@ function reasoningMarkup(reasoning) {
     : "";
 }
 
+function finishStreamingAssistant(message, result) {
+  const messageContent = message.querySelector(".message-content");
+  if (!messageContent) return;
+  if (state.active.characterType !== "assistant") {
+    messageContent.innerHTML = `<div class="bubble">${esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}`;
+    const container = document.querySelector("#messages");
+    if (container) container.scrollTop = container.scrollHeight;
+    return;
+  }
+
+  const container = document.querySelector("#messages");
+  const body = message.querySelector(".assistant-text");
+  const reasoning = message.querySelector(".reasoning-panel");
+  const bodyTop = body?.getBoundingClientRect().top;
+  const mode = chatScroll.mode;
+
+  if (reasoning && result.reasoning) {
+    reasoning.querySelector("summary").textContent = "已深度思考";
+    renderMarkdown(reasoning.querySelector("div"), result.reasoning);
+  } else if (!reasoning && result.reasoning) {
+    messageContent.insertAdjacentHTML("afterbegin", reasoningMarkup(result.reasoning));
+  } else reasoning?.remove();
+
+  const finalBody = message.querySelector(".assistant-text") || body;
+  if (finalBody) {
+    finalBody.classList.add("assistant-text", "markdown-body");
+    renderMarkdown(finalBody, result.answer);
+  }
+  message.querySelector(".stamp")?.remove();
+  messageContent.insertAdjacentHTML("beforeend", assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true));
+
+  const finalReasoning = message.querySelector(".reasoning-panel");
+  if (finalReasoning) finalReasoning.open = mode === "manual";
+  if (!container) return;
+  if (mode === "bottom") container.scrollTop = container.scrollHeight;
+  else if (mode === "threshold" && bodyTop != null && finalBody) {
+    container.scrollTop += finalBody.getBoundingClientRect().top - bodyTop;
+  }
+  syncChatScroll();
+}
+
 function messageMarkup(message, character, canRegenerate = false, canEdit = false) {
   const isAssistant = message.role === "assistant";
   const isDeepSeek = character?.characterType === "assistant";
@@ -260,8 +368,13 @@ function messageMarkup(message, character, canRegenerate = false, canEdit = fals
 }
 
 function updateStreamingAssistant(message, bubble, partial, reasoning) {
-  if (state.active?.characterType === "assistant") renderStreamingMarkdown(bubble, partial);
-  else bubble.textContent = partial;
+  if (state.active?.characterType === "assistant") {
+    bubble.classList.add("assistant-text", "markdown-body");
+    renderStreamingMarkdown(bubble, partial);
+  } else {
+    bubble.textContent = partial;
+    syncChatScroll();
+  }
   if (!reasoning || state.active?.characterType !== "assistant") return;
   let panel = message.querySelector(".reasoning-panel");
   if (!panel) {
@@ -308,13 +421,13 @@ async function rewriteUserMessage(messageId, content) {
   assistant.removeAttribute("data-message-id");
   assistant.innerHTML = '<div class="message-content"><div class="bubble">正在重新回应…</div><span class="stamp"></span></div>';
   const assistantBubble = assistant.querySelector(".bubble");
+  beginAssistantScroll(assistant);
   updateComposerState(composer?.content);
   scrollMessages();
   try {
     const result = await streamChat(state.active.id, content, (partial, reasoning) => {
       updateStreamingAssistant(assistant, assistantBubble, partial, reasoning);
       assistant.classList.remove("pending");
-      scrollMessages();
     }, messageId, state.activeConversation.id, true);
     const userIndex = state.messages.findIndex((message) => message.id === messageId);
     if (userIndex >= 0) {
@@ -328,7 +441,7 @@ async function rewriteUserMessage(messageId, content) {
     assistant.className = "message";
     assistant.dataset.messageId = String(result.messageId || "");
     assistant.dataset.originalContent = result.answer;
-    assistant.innerHTML = `<div class="message-content">${state.active.characterType === "assistant" ? reasoningMarkup(result.reasoning) : ""}<div class="bubble${state.active.characterType === "assistant" ? " assistant-text markdown-body" : ""}">${state.active.characterType === "assistant" ? markdownMarkup(result.answer) : esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}</div>`;
+    finishStreamingAssistant(assistant, result);
     container.querySelectorAll("[data-regenerate]").forEach((button) => {
       if (!assistant.contains(button)) button.remove();
     });
@@ -344,6 +457,7 @@ async function rewriteUserMessage(messageId, content) {
     }
     notify(error.message);
   } finally {
+    endAssistantScroll();
     state.sending = false;
     userMessage.classList.remove("is-rewriting");
     updateComposerState(composer?.content);
@@ -389,8 +503,8 @@ function beginUserMessageEdit(message) {
   const sendButton = composer.querySelector(".send");
   sendButton.setAttribute("aria-label", "更新并发送");
   sendButton.innerHTML = '<i data-lucide="check"></i>';
-  resizeComposer(textarea);
   updateComposerState(textarea);
+  resizeComposer(textarea);
   refreshIcons();
   textarea.focus();
   textarea.setSelectionRange(textarea.value.length, textarea.value.length);
@@ -492,21 +606,18 @@ function bindMessageActions() {
       message.querySelector(".reasoning-panel")?.remove();
       bubble.textContent = "正在重新回应…";
     }
+    beginAssistantScroll(message);
     try {
       const result = await streamChat(state.active.id, "", (partial, reasoning) => {
         updateStreamingAssistant(message, bubble, partial, reasoning);
         message.classList.remove("pending");
-        scrollMessages();
       }, Number(regenerateButton.dataset.regenerate), state.activeConversation.id);
       bubble.textContent = result.answer;
       message.dataset.messageId = result.messageId;
       const index = state.messages.findIndex((item) => item.id === Number(result.messageId));
       if (index >= 0) state.messages[index] = { ...state.messages[index], content: result.answer, reasoning: result.reasoning };
       message.dataset.originalContent = result.answer;
-      const messageContent = message.querySelector(".message-content");
-      if (messageContent) {
-        messageContent.innerHTML = `${state.active.characterType === "assistant" ? reasoningMarkup(result.reasoning) : ""}<div class="bubble${state.active.characterType === "assistant" ? " assistant-text markdown-body" : ""}">${state.active.characterType === "assistant" ? markdownMarkup(result.answer) : esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}`;
-      }
+      finishStreamingAssistant(message, result);
       message.classList.remove("pending");
       bindSpeechButtons();
     } catch (error) {
@@ -519,6 +630,7 @@ function bindMessageActions() {
       bindSpeechButtons();
       notify(error.message);
     } finally {
+      endAssistantScroll();
       state.sending = false;
       setMessageActionBusy(message, false);
       message.classList.remove("pending");
@@ -678,16 +790,16 @@ async function sendMessage(event) {
   });
   const assistant = document.createElement("div");
   assistant.className = "message pending";
-  assistant.innerHTML = `<div><div class="bubble">正在回应…</div><span class="stamp"></span></div>`;
+  assistant.innerHTML = '<div class="message-content"><div class="bubble">正在回应…</div><span class="stamp"></span></div>';
   container.insertAdjacentHTML("beforeend", messageMarkup({ role: "user", content }, state.active));
   container.append(assistant);
   const bubble = assistant.querySelector(".bubble");
+  beginAssistantScroll(assistant);
   scrollMessages();
   try {
     const result = await streamChat(state.active.id, content, (partial, reasoning) => {
       updateStreamingAssistant(assistant, bubble, partial, reasoning);
       assistant.classList.remove("pending");
-      scrollMessages();
     }, null, state.activeConversation.id);
     userMessage.id = result.userMessageId;
     const userElement = container.querySelector(`.message.user:not([data-message-id]), .message.user[data-message-id=""]`);
@@ -710,7 +822,7 @@ async function sendMessage(event) {
     assistant.classList.remove("pending");
     assistant.dataset.messageId = result.messageId;
     assistant.dataset.originalContent = result.answer;
-    assistant.innerHTML = `<div class="message-content">${state.active.characterType === "assistant" ? reasoningMarkup(result.reasoning) : ""}<div class="bubble${state.active.characterType === "assistant" ? " assistant-text markdown-body" : ""}">${state.active.characterType === "assistant" ? markdownMarkup(result.answer) : esc(result.answer)}</div>${assistantStampMarkup({ id: result.messageId, content: result.answer, characterType: state.active.characterType }, state.active, true)}</div>`;
+    finishStreamingAssistant(assistant, result);
     container.querySelectorAll("[data-regenerate]").forEach((button) => {
       if (!assistant.contains(button)) button.remove();
     });
@@ -724,6 +836,7 @@ async function sendMessage(event) {
     updateComposerState(textarea);
     notify("发送失败，消息已保留，可再次发送");
   } finally {
+    endAssistantScroll();
     state.sending = false;
     updateComposerState(textarea);
     textarea.focus();
@@ -1470,7 +1583,7 @@ export function renderChat({ onBack }) {
   const latestAssistantIndex = state.messages.reduce((latest, message, index) => message.role === "assistant" ? index : latest, -1);
   const latestUserIndex = state.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
   const messages = state.messages.map((message, index) => messageMarkup(message, character, index === latestAssistantIndex, index === latestUserIndex)).join("");
-  app.innerHTML = `<section class="chat-view ${character.characterType === "assistant" ? "deepseek-chat" : ""}"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button>${character.characterType === "assistant" ? '<button class="icon-button chat-tool" id="video-transcription" aria-label="视频转文字"><i data-lucide="file-video"></i></button>' : '<button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button>'}</div></header><div class="messages scroll-container" id="messages">${messages}</div><form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
+  app.innerHTML = `<section class="chat-view ${character.characterType === "assistant" ? "deepseek-chat" : ""}"><header class="chat-header"><button class="icon-button chat-tool" id="back" aria-label="返回联系人"><i data-lucide="arrow-left"></i></button>${avatar(character, true)}<div class="chat-meta"><strong>${esc(character.name)}</strong></div><div class="chat-actions"><button class="icon-button chat-tool" id="history" aria-label="历史对话"><i data-lucide="clock-3"></i></button><button class="icon-button chat-tool chat-settings" id="settings" aria-label="修改角色配置"><i data-lucide="settings-2"></i></button>${character.characterType === "assistant" ? '<button class="icon-button chat-tool" id="video-transcription" aria-label="视频转文字"><i data-lucide="file-video"></i></button>' : '<button class="icon-button chat-tool call-button" id="call" aria-label="语音通话"><i data-lucide="phone"></i></button>'}</div></header><div class="messages scroll-container" id="messages">${messages}</div>${character.characterType === "assistant" ? '<button class="chat-scroll-bottom" id="chat-scroll-bottom" type="button" aria-label="滚动到最新消息" hidden><i data-lucide="arrow-down"></i></button>' : ""}<form class="composer send-hidden" id="composer"><div class="composer-edit-header"><span>编辑消息</span><button class="composer-edit-cancel" type="button" aria-label="取消编辑"><i data-lucide="x"></i></button></div><button class="composer-button" type="button" id="dictate" aria-label="语音输入"><i data-lucide="mic"></i></button><textarea class="text-area" name="content" rows="1" maxlength="4000" placeholder="输入消息…" required></textarea><button class="composer-button send" type="submit" aria-label="发送" aria-hidden="true" disabled><i data-lucide="send"></i></button></form></section>${settingsMarkup(character)}${historyMarkup()}`;
   bindChatViewport();
   document.querySelector("#back").onclick = async () => {
     viewportSyncController?.abort();
@@ -1498,4 +1611,5 @@ export function renderChat({ onBack }) {
   bindSpeechButtons();
   bindMessageActions();
   scrollMessages();
+  bindChatScroll();
 }

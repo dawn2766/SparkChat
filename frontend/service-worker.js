@@ -1,4 +1,4 @@
-const CACHE_NAME = "sparkchat-shell-v109";
+const CACHE_NAME = "sparkchat-shell-v110";
 const SERVICE_WORKER_ENABLED = new URL(self.location.href).searchParams.get("enabled") === "1";
 const APP_SHELL = [
   "./",
@@ -7,7 +7,7 @@ const APP_SHELL = [
   "./styles/components.css",
   "./styles/views.css?v=108",
   "./styles/responsive.css",
-  "./scripts/main.js?v=109",
+  "./scripts/main.js?v=110",
   "./scripts/custom-select.js",
   "./scripts/api.js",
   "./scripts/video-compression.js",
@@ -18,7 +18,7 @@ const APP_SHELL = [
   "./scripts/avatar-cropper.js",
   "./scripts/views/auth.js",
   "./scripts/views/home.js",
-  "./scripts/views/chat.js",
+  "./scripts/views/chat.js?v=110",
   "./scripts/views/create.js",
   "./scripts/views/profile.js",
   "./manifest.webmanifest",

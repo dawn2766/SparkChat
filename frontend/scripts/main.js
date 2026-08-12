@@ -109,7 +109,7 @@ async function loadProfile(historyMode = "push") {
 }
 
 async function openCharacter(id, historyMode = "push") {
-  const { openChat } = await import("./views/chat.js");
+  const { openChat } = await import("./views/chat.js?v=110");
   await openChat(id, goBack);
   currentRoute = { name: "chat", id };
   if (historyMode) writeHistory(currentRoute, historyMode);
@@ -130,7 +130,7 @@ function showAuth(error = "", historyMode = "replace") {
 
 async function renderRoute(route) {
   if (currentRoute.name === "chat" && route.name !== "chat") {
-    const { stopVoiceInteraction } = await import("./views/chat.js");
+    const { stopVoiceInteraction } = await import("./views/chat.js?v=110");
     await stopVoiceInteraction();
   }
   if (!state.user || route.name === "auth") {

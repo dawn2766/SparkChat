@@ -1145,11 +1145,47 @@
 .messages {
   flex: 1;
   overflow-y: auto;
+  overflow-anchor: none;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 24px 16px;
 }
+
+.chat-scroll-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  z-index: 4;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+
+.chat-scroll-bottom[hidden] { display: none; }
+.chat-scroll-bottom svg { width: 18px; height: 18px; }
+.chat-scroll-bottom.generating::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: conic-gradient(from 0deg, transparent 0 55%, var(--accent) 78%, transparent 100%);
+  padding: 2px;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: chat-scroll-glow 1.25s linear infinite;
+}
+
+@keyframes chat-scroll-glow { to { transform: rotate(1turn); } }
 
 .message {
   min-width: 0;
