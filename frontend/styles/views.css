@@ -1760,11 +1760,6 @@
   gap: 2px;
 }
 
-.phone-live-actions .message-action {
-  width: 28px;
-  height: 24px;
-}
-
 .voice-history-page {
   width: min(100%, 580px);
   height: var(--chat-viewport-height, 100dvh);
