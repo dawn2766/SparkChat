@@ -113,6 +113,28 @@ class SparkChatApiTest(unittest.TestCase):
         )
         self.assertNotIn("unreadCount", response.json["characters"][0])
 
+    def test_admin_can_hide_and_show_deepseek_assistant(self):
+        from backend.app import get_db
+
+        self.login(self.admin_username, self.admin_password)
+        admin_characters = self.client.get("/api/admin/characters")
+        self.assertEqual(admin_characters.status_code, 200)
+        assistant = next(character for character in admin_characters.json["characters"] if character["characterType"] == "assistant")
+        self.assertFalse(assistant["isHidden"])
+
+        hidden = self.client.patch(f"/api/admin/characters/{assistant['id']}", json={"hidden": True})
+        self.assertEqual(hidden.status_code, 200)
+        self.assertTrue(hidden.json["character"]["isHidden"])
+        self.assertNotIn(assistant["id"], {character["id"] for character in self.client.get("/api/characters").json["characters"]})
+        self.assertIn(assistant["id"], {character["id"] for character in self.client.get("/api/admin/characters").json["characters"]})
+
+        shown = self.client.patch(f"/api/admin/characters/{assistant['id']}", json={"hidden": False})
+        self.assertEqual(shown.status_code, 200)
+        self.assertFalse(shown.json["character"]["isHidden"])
+        self.assertIn(assistant["id"], {character["id"] for character in self.client.get("/api/characters").json["characters"]})
+        with self.app.app_context():
+            self.assertEqual(get_db().execute("SELECT is_hidden FROM characters WHERE id = ?", (assistant["id"],)).fetchone()[0], 0)
+
     def test_video_transcription_uses_seed_turbo_and_cleans_up_file(self):
         from backend import app as app_module
 

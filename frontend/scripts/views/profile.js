@@ -122,7 +122,7 @@ function roleEditorMarkup(character = null) {
       <div class="field"><label>${isDeepSeek ? "系统提示词" : "身份背景"}</label><textarea class="text-area character-prompt" name="persona" maxlength="2400" required>${esc(character?.persona || "")}</textarea></div>
       ${isDeepSeek ? `<div class="field"><label>模型</label><select class="select-input" name="modelId">${modelOptions}</select></div><div class="field"><label>深度思考</label><select class="select-input" name="thinkingEnabled"><option value="1" ${character.thinkingEnabled ? "selected" : ""}>开启</option><option value="0" ${!character.thinkingEnabled ? "selected" : ""}>关闭</option></select></div>` : `<div class="field"><label>回答语言</label><select class="select-input" name="language"><option value="zh" ${character?.language !== "en" ? "selected" : ""}>中文</option><option value="en" ${character?.language === "en" ? "selected" : ""}>英文</option></select></div><div class="field"><label>角色音色</label><select class="select-input" name="voiceId" required>${voiceOptions(character?.voiceId)}</select></div>`}
     </div>
-    <footer class="dialog-actions admin-editor-actions character-form-actions dialog-actions-split">${character && !isDeepSeek ? '<button class="danger-button" type="button" data-delete-role>删除角色</button>' : "<span></span>"}<button class="primary-button" type="submit">${character ? "保存并同步" : "新增并同步"}</button></footer>
+    <footer class="dialog-actions admin-editor-actions character-form-actions dialog-actions-split">${character ? (isDeepSeek ? `<button class="${character.isHidden ? "primary-button" : "danger-button"}" type="button" data-toggle-role>${character.isHidden ? "显示角色" : "隐藏角色"}</button>` : '<button class="danger-button" type="button" data-delete-role>删除角色</button>') : "<span></span>"}<button class="primary-button" type="submit">${character ? "保存并同步" : "新增并同步"}</button></footer>
   </form>`;
 }
 
@@ -154,6 +154,13 @@ async function bindRoleManager(dialog, selectedId = null) {
     try {
       await api(`/api/admin/characters/${selected.id}`, { method: "DELETE" });
       await bindRoleManager(dialog);
+    } catch (error) { notify(error.message); }
+  };
+  const toggleButton = form.querySelector("[data-toggle-role]");
+  if (toggleButton) toggleButton.onclick = async () => {
+    try {
+      await api(`/api/admin/characters/${selected.id}`, { method: "PATCH", body: JSON.stringify({ hidden: !selected.isHidden }) });
+      dialog.close();
     } catch (error) { notify(error.message); }
   };
 }

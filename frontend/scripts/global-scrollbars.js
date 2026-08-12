@@ -25,7 +25,8 @@ function hasOverflow(element, axis) {
 }
 
 function trackInset(target, axis) {
-  return axis === "y" && target.matches("textarea") ? 8 : 0;
+  if (axis === "x") return 8;
+  return target.matches("textarea") ? 8 : 0;
 }
 
 function clippingRect(target) {
@@ -54,7 +55,7 @@ function updateOverlay(overlay) {
     overlays.delete(overlay);
     return;
   }
-  if (!hasOverflow(target, axis)) {
+  if (target.closest("details:not([open])") || !hasOverflow(target, axis)) {
     track.hidden = true;
     return;
   }
@@ -64,7 +65,7 @@ function updateOverlay(overlay) {
   const horizontal = axis === "x";
   const inset = trackInset(target, axis);
   const trackRect = horizontal
-    ? { top: rect.bottom - 8, right: rect.right, bottom: rect.bottom, left: rect.left }
+    ? { top: rect.bottom - 8, right: rect.right - inset, bottom: rect.bottom, left: rect.left + inset }
     : { top: rect.top + inset, right: rect.right, bottom: rect.bottom - inset, left: rect.right - 8 };
   if (
     trackRect.bottom <= clip.top || trackRect.top >= clip.bottom
@@ -76,16 +77,18 @@ function updateOverlay(overlay) {
   const viewport = horizontal ? target.clientWidth : target.clientHeight;
   const content = horizontal ? target.scrollWidth : target.scrollHeight;
   const scroll = horizontal ? target.scrollLeft : target.scrollTop;
-  const trackLength = horizontal ? rect.width : Math.max(0, rect.height - inset * 2);
+  const trackLength = horizontal
+    ? Math.max(0, rect.width - inset * 2)
+    : Math.max(0, rect.height - inset * 2);
   const thumbLength = Math.max(28, viewport * trackLength / content);
   const available = Math.max(0, trackLength - thumbLength);
   const maxScroll = content - viewport;
   const offset = available * Math.min(1, Math.max(0, scroll / maxScroll));
 
   track.hidden = false;
-  track.style.left = `${horizontal ? rect.left : rect.right - 8}px`;
+  track.style.left = `${horizontal ? rect.left + inset : rect.right - 8}px`;
   track.style.top = `${horizontal ? rect.bottom - 8 : rect.top + inset}px`;
-  track.style.width = `${horizontal ? rect.width : 8}px`;
+  track.style.width = `${horizontal ? Math.max(0, rect.width - inset * 2) : 8}px`;
   track.style.height = `${horizontal ? 8 : Math.max(0, rect.height - inset * 2)}px`;
   thumb.style.width = `${horizontal ? thumbLength : 4}px`;
   thumb.style.height = `${horizontal ? 4 : thumbLength}px`;
@@ -168,6 +171,15 @@ export function initializeGlobalScrollbars(root = document) {
 document.addEventListener("input", (event) => {
   if (event.target.matches?.(TARGET_SELECTOR)) scan(event.target);
 });
+
+document.addEventListener("toggle", (event) => {
+  if (!event.target.matches?.("details")) return;
+  overlays.forEach(updateOverlay);
+  requestAnimationFrame(() => {
+    overlays.forEach(updateOverlay);
+    requestAnimationFrame(() => overlays.forEach(updateOverlay));
+  });
+}, true);
 
 window.addEventListener("resize", () => overlays.forEach(updateOverlay));
 window.addEventListener("scroll", () => overlays.forEach(updateOverlay), true);

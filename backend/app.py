@@ -519,6 +519,8 @@ def init_db():
         database.execute("ALTER TABLE characters ADD COLUMN name_en TEXT")
     if "persona_en" not in character_columns:
         database.execute("ALTER TABLE characters ADD COLUMN persona_en TEXT")
+    if "is_hidden" not in character_columns:
+        database.execute("ALTER TABLE characters ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0")
     override_columns = {row["name"] for row in database.execute("PRAGMA table_info(character_overrides)").fetchall()}
     if "character_type" not in override_columns:
         database.execute("ALTER TABLE character_overrides ADD COLUMN character_type TEXT NOT NULL DEFAULT 'character'")
@@ -765,6 +767,7 @@ def serialize_character(row):
         "thinkingEnabled": bool(row["thinking_enabled"]) if "thinking_enabled" in row.keys() else True,
         "avatarUrl": row["avatar_url"],
         "isPreset": bool(row["is_preset"]),
+        "isHidden": bool(row["is_hidden"]) if "is_hidden" in row.keys() else False,
         "lastMessage": (row["last_message"] or "") if "last_message" in row.keys() else "",
         "lastMessageAt": row["last_message_at"] if "last_message_at" in row.keys() else None,
     }
@@ -1172,6 +1175,20 @@ def update_preset_character(character_id):
     if character is None:
         return jsonify(error="未找到该预置角色"), 404
     payload = request.get_json(silent=True) or {}
+    if "hidden" in payload:
+        if character_value(character, "character_type") != "assistant":
+            return jsonify(error="仅 DeepSeek 助手支持隐藏角色"), 409
+        hidden = payload["hidden"]
+        if not isinstance(hidden, bool):
+            return jsonify(error="隐藏状态无效"), 400
+        database = get_db()
+        database.execute(
+            "UPDATE characters SET is_hidden = ? WHERE id = ?",
+            (int(hidden), character_id),
+        )
+        database.commit()
+        row = database.execute("SELECT * FROM characters WHERE id = ?", (character_id,)).fetchone()
+        return jsonify(character=serialize_character(row))
     try:
         avatar_url = avatar_url_from(payload, character["avatar_url"])
         if character_value(character, "character_type") == "assistant":
@@ -1332,6 +1349,7 @@ def list_characters():
             COALESCE(o.model_id, c.model_id) AS model_id,
             COALESCE(o.thinking_enabled, c.thinking_enabled) AS thinking_enabled,
             COALESCE(o.avatar_url, c.avatar_url) AS avatar_url,
+            c.is_hidden AS is_hidden,
             lm.content AS last_message,
             lm.created_at AS last_message_at
         FROM characters c
@@ -1340,7 +1358,7 @@ def list_characters():
             ON lc.character_id = c.id AND lc.position = 1
         LEFT JOIN latest_messages lm
             ON lm.conversation_id = lc.id AND lm.position = 1
-        WHERE c.is_preset = 1 OR c.owner_id = ?
+        WHERE (c.is_preset = 1 AND c.is_hidden = 0) OR c.owner_id = ?
         ORDER BY c.is_preset DESC,
             CASE WHEN c.character_type = 'assistant' THEN 1 ELSE 0 END,
             COALESCE(last_message_at, c.created_at) DESC
