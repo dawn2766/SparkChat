@@ -1157,20 +1157,20 @@
   right: 18px;
   bottom: calc(72px + env(safe-area-inset-bottom));
   z-index: 4;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   padding: 0;
   color: var(--ink);
   border: .5px solid var(--line);
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow);
 }
 
 .chat-scroll-bottom[hidden] { display: none; }
-.chat-scroll-bottom svg { width: 15px; height: 15px; }
+.chat-scroll-bottom svg { width: 16px; height: 16px; }
 .chat-scroll-bottom.generating::before {
   content: "";
   position: absolute;
