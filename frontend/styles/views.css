@@ -1157,15 +1157,15 @@
   right: 18px;
   bottom: calc(72px + env(safe-area-inset-bottom));
   z-index: 4;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   padding: 0;
   color: var(--ink);
-  border: 1px solid var(--line-strong);
+  border: .5px solid var(--line);
   border-radius: 50%;
-  background: var(--surface-raised);
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -1180,6 +1180,7 @@
   padding: 1px;
   pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: chat-scroll-glow 1.25s linear infinite;

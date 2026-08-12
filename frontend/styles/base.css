@@ -77,6 +77,15 @@ html {
   cursor: pointer;
 }
 
+.global-scrollbar-anchor {
+  position: relative;
+}
+
+.global-scrollbar-local {
+  position: absolute;
+  z-index: 3;
+}
+
 .global-scrollbar::before {
   content: "";
   position: absolute;

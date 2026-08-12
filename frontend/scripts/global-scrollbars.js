@@ -49,7 +49,7 @@ function clippingRect(target) {
 }
 
 function updateOverlay(overlay) {
-  const { target, axis, track, thumb } = overlay;
+  const { target, axis, track, thumb, anchor } = overlay;
   if (!target.isConnected) {
     track.remove();
     overlays.delete(overlay);
@@ -86,8 +86,16 @@ function updateOverlay(overlay) {
   const offset = available * Math.min(1, Math.max(0, scroll / maxScroll));
 
   track.hidden = false;
-  track.style.left = `${horizontal ? rect.left + inset : rect.right - 8}px`;
-  track.style.top = `${horizontal ? rect.bottom - 8 : rect.top + inset}px`;
+  if (track.classList.contains("global-scrollbar-local")) {
+    const anchorRect = anchor.getBoundingClientRect();
+    const anchorLeft = anchorRect.left + anchor.clientLeft - anchor.scrollLeft;
+    const anchorTop = anchorRect.top + anchor.clientTop - anchor.scrollTop;
+    track.style.left = `${(horizontal ? rect.left + inset : rect.right - 8) - anchorLeft}px`;
+    track.style.top = `${(horizontal ? rect.bottom - 8 : rect.top + inset) - anchorTop}px`;
+  } else {
+    track.style.left = `${horizontal ? rect.left + inset : rect.right - 8}px`;
+    track.style.top = `${horizontal ? rect.bottom - 8 : rect.top + inset}px`;
+  }
   track.style.width = `${horizontal ? Math.max(0, rect.width - inset * 2) : 8}px`;
   track.style.height = `${horizontal ? 8 : Math.max(0, rect.height - inset * 2)}px`;
   thumb.style.width = `${horizontal ? thumbLength : 4}px`;
@@ -102,9 +110,15 @@ function createOverlay(target, axis) {
   const thumb = document.createElement("span");
   thumb.className = "global-scrollbar-thumb";
   track.append(thumb);
-  (target.closest("dialog") || document.body).append(track);
+  const local = Boolean(target.closest("#messages"));
+  const anchor = local ? target.parentElement : target.closest("dialog") || document.body;
+  if (local) {
+    anchor.classList.add("global-scrollbar-anchor");
+    track.classList.add("global-scrollbar-local");
+  }
+  anchor.append(track);
 
-  const overlay = { target, axis, track, thumb };
+  const overlay = { target, axis, track, thumb, anchor };
   const update = () => updateOverlay(overlay);
   target.addEventListener("scroll", update, { passive: true });
   track.addEventListener("pointerdown", (event) => {
