@@ -245,7 +245,7 @@ bindNavigationGestures();
 initializeGlobalScrollbars();
 boot();
 
-const SERVICE_WORKER_ENABLED = false;
+const SERVICE_WORKER_ENABLED = true;
 
 if ("serviceWorker" in navigator) {
   if (SERVICE_WORKER_ENABLED) {
