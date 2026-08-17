@@ -1,4 +1,4 @@
-const CACHE_NAME = "sparkchat-shell-v110";
+const CACHE_NAME = "sparkchat-shell-v111";
 const SERVICE_WORKER_ENABLED = new URL(self.location.href).searchParams.get("enabled") === "1";
 const APP_SHELL = [
   "./",
