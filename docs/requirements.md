@@ -97,7 +97,7 @@ SparkChat 是面向移动设备的可安装 PWA 数字角色对话应用。用�
 - 浏览器通过同源 WebSocket 连接后端实时代理，由服务端连接豆包端到端实时语音 API；API Key 不得暴露给浏览器。
 - 通话界面显示角色头像、连接状态、双方字幕、输入/输出音量状态、麦克风静音和挂断控制。
 - 输入为 16 kHz 单声道 PCM，输出为 24 kHz PCM16。
-- `ICL_uranus_` 音色使用实时模型版本 `2.1.0.0`；`S_`、一般 `ICL_`、`saturn_`、`sparkchat_` 和 `custom_` 音色使用 `2.2.0.0`。
+- `ICL_uranus_` 音色使用 O2.0 实时链路；`S_`、一般 `ICL_`、`saturn_`、`sparkchat_` 和 `custom_` 音色使用 SC2.0 实时链路。具体协议模型版本集中在 `backend/model_config.py` 维护，文档不再记录版本号。
 - 实时配置接口返回 WebSocket 地址、资源 ID、角色 speaker ID、角色语言、角色指令和 speaking style，不返回供应商访问令牌。
 - 实时代理默认监听 `127.0.0.1:3101`；缺少 API Key 或有效音色时，配置接口返回 `503`。
 

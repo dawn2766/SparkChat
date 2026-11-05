@@ -66,11 +66,11 @@ COOKIE_SECURE=false
 128 个字符。初始化完成后可以移除这两个环境变量；已有数据库中的管理员账号不会被覆盖或重置。
 如果配置的管理员账号已被占用，服务启动会明确报错，不会静默跳过创建。
 
-文本、记忆、翻译、TTS 和实时语音模型统一维护在 [backend/model_config.py](backend/model_config.py)，修改后重启服务即可生效。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
+文本、记忆、翻译、TTS 和实时语音模型统一维护在 [backend/model_config.py](backend/model_config.py)，修改后重启服务即可生效。文本模型一律使用不带日期/版本后缀的模型族名（例如 `deepseek-v4-flash`），由服务端自动解析到该模型族的最新版本。角色的回答语言保存在角色配置中，支持 `zh`（中文）和 `en`（英文）；威震天默认使用英文。
 
 每个对话独立保存长期记忆。模型调用会携带长期记忆和连续的近期原文上下文；近期上下文只有 48000 token 上限，系统会从最新消息向前连续选取，尽可能接近该上限。长期记忆每新增约 44000 token 的稳定内容后在后台更新。上述阈值可通过环境变量调整，但必须保持 `0 < MEMORY_UPDATE_INTERVAL_TOKENS < RECENT_CONTEXT_MAX_TOKENS`。尚未进入长期记忆的消息始终会完整传入，即使后台更新延迟导致近期上下文临时超过上限，也不会丢失对话信息。已有消息会在数据库迁移时以字符数回填 token 数，后续模型返回的 usage 会更新未计量消息。
 
-实时语音使用独立阈值。项目实际调用的 SC2.0 `2.2.0.0` 官方最大上下文为 12K；SparkChat 为系统提示词和当前回复预留空间，默认选择不超过 9000 token 的近期语音原文，并每积累约 8000 token 的稳定内容更新一次中英文长期记忆。实时 API 的 `154 UsageResponse` 会将本轮输入音频 token 和输出文本 token 写回对应消息；缺少 usage 的旧语音消息按英文单词与 CJK 字符数回填。接口事件与上下文限制见[火山引擎端到端实时语音大模型 API 接入文档](https://docs.volcengine.com/docs/6561/1594356?lang=zh)。
+实时语音使用独立阈值。项目实际调用的 SC2.0 官方最大上下文为 12K；SparkChat 为系统提示词和当前回复预留空间，默认选择不超过 9000 token 的近期语音原文，并每积累约 8000 token 的稳定内容更新一次中英文长期记忆。实时 API 的 `154 UsageResponse` 会将本轮输入音频 token 和输出文本 token 写回对应消息；缺少 usage 的旧语音消息按英文单词与 CJK 字符数回填。接口事件与上下文限制见[火山引擎端到端实时语音大模型 API 接入文档](https://docs.volcengine.com/docs/6561/1594356?lang=zh)。
 
 音色属于数字角色，而不是独立的用户资源。系统通过 `/api/voices` 提供只读音色目录，角色记录中的 `voice_id` 保存真实豆包 speaker ID；预置角色的用户级覆盖也保存自己的 speaker ID。聊天朗读和端到端实时语音都直接读取同一角色 speaker，因此不存在 TTS 音色与实时音色的两套环境映射，也不提供自定义音色设计、声音复刻、训练状态、试听或重命名功能。
 
@@ -145,7 +145,7 @@ location /sparkchat/realtime {
 - 音色归属：每个角色和预置角色覆盖记录独立保存 `voice_id` 与 `voice_name`；前端不再提供“我的音色”或自定义音色入口。
 - 聊天朗读：`POST /api/characters/:id/speak` 调用豆包 V3 HTTP Chunked TTS。
 - 聊天听写：浏览器上传 16 kHz PCM，经实时代理读取 `451 ASRResponse`。
-- 实时通话：代理连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`；`ICL_uranus_...` ICL V3 音色使用 O2.0 `2.1.0.0`，SC2.0 音色使用 `2.2.0.0`，输入 16 kHz PCM，输出 24 kHz PCM。
+- 实时通话：代理连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`；`ICL_uranus_...` ICL V3 音色使用 O2.0 链路，其余 SC2.0 音色使用 SC2.0 链路（协议模型版本统一维护在 [backend/model_config.py](backend/model_config.py)，不记录版本号），输入 16 kHz PCM，输出 24 kHz PCM。
 - 用户字幕：当前旧版 S2S 接口实际返回的 `451 ASRResponse.results[].text` 是当前话轮的累计识别快照；每个新快照替换上一版字幕，只有 `459 ASREnded` 到达时的最后快照会保存为用户消息。角色侧 `550 ChatResponse.content` 仍按流式增量拼接。
 - 麦克风输入：浏览器显式请求单声道、回声消除、降噪和自动增益，采集结果重采样为 16 kHz、int16 小端 PCM，并按官方推荐的 20 ms（640 字节）分包持续上传。服务端使用 `keep_alive` 模式和官方默认 1500 ms 判停窗口，不在客户端设置音量阈值或丢弃小声 PCM。
 - 回合与撤回：实时事件的 `question_id` 作为本地回合 ID，同一角色的完成事件重放不会重复入库。用户输入完成后可撤回最近一轮；客户端立即停止残留播报，并通过官方 `ConversationDelete` 事件与本地原子删除同步移除该轮用户输入、角色回复和后续上下文。
