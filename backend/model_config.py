@@ -1,24 +1,20 @@
-"""Central registry for model identifiers used by SparkChat.
+"""Central registry for model identifiers used by SparkChat."""
 
-Model IDs intentionally carry no date or version suffix: Ark resolves each name
-to the latest released snapshot of that model family.
-"""
-
-TRANSLATION_MODEL = "deepseek-v4-flash"
-DEFAULT_CHAT_MODEL = "doubao-seed-character"
-MEMORY_MODEL = "deepseek-v4-flash"
-VIDEO_TRANSCRIPTION_MODEL = "doubao-seed-2-1-turbo"
+TRANSLATION_MODEL = "deepseek-v4-flash-ga-260731"
+DEFAULT_CHAT_MODEL = "doubao-seed-character-260628"
+MEMORY_MODEL = "deepseek-v4-flash-ga-260731"
+VIDEO_TRANSCRIPTION_MODEL = "doubao-seed-2-1-turbo-260628"
 DEEPSEEK_ASSISTANT_NAME = "DeepSeek"
-DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash-ga-260731"
 DEEPSEEK_MODELS = {
-    "deepseek-v4-flash": "DeepSeek V4 Flash",
-    "deepseek-v4-pro": "DeepSeek V4 Pro",
+    "deepseek-v4-flash-ga-260731": "DeepSeek V4 Flash",
+    "deepseek-v4-pro-ga-260813": "DeepSeek V4 Pro",
 }
 
 CHAT_MODELS = {
-    "doubao-seed-character": "Doubao Seed Character",
-    "deepseek-v4-flash": "DeepSeek V4 Flash",
-    "deepseek-v4-pro": "DeepSeek V4 Pro",
+    "doubao-seed-character-260628": "Doubao Seed Character",
+    "deepseek-v4-flash-ga-260731": "DeepSeek V4 Flash",
+    "deepseek-v4-pro-ga-260813": "DeepSeek V4 Pro",
 }
 
 TTS_MODEL = "seed-tts-2.0-expressive"
